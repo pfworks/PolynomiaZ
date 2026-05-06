@@ -34,11 +34,11 @@ struct Cli {
 
     /// Columnar pre-processing with given record stride (bytes)
     #[arg(short = 'r', long = "record-size")]
-    record_size: Option<usize>,
+    record_size: Option<String>,
 
-    /// Chunked/streaming mode with given chunk size (bytes)
+    /// Chunked/streaming mode. Accepts: "auto", or size like 64k, 1M, 65536
     #[arg(short = 'C', long = "chunk-size")]
-    chunk_size: Option<usize>,
+    chunk_size: Option<String>,
 
     /// Test integrity (decompress and discard)
     #[arg(short, long)]
@@ -50,6 +50,38 @@ struct Cli {
 
     /// Input files (use - for stdin)
     files: Vec<String>,
+}
+
+/// Parse a human-readable size string: "64k", "1M", "4096", etc.
+fn parse_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty size".into());
+    }
+    let (num_str, multiplier) = match s.as_bytes().last() {
+        Some(b'k' | b'K') => (&s[..s.len()-1], 1024),
+        Some(b'm' | b'M') => (&s[..s.len()-1], 1024 * 1024),
+        Some(b'g' | b'G') => (&s[..s.len()-1], 1024 * 1024 * 1024),
+        _ => (s, 1),
+    };
+    let num: usize = num_str.parse().map_err(|_| format!("invalid size: {}", s))?;
+    Ok(num * multiplier)
+}
+
+/// Auto-detect optimal chunk size based on file size.
+/// Heuristic: aim for 16-256 chunks, with chunk sizes that are powers of 2.
+fn auto_chunk_size(data_len: usize) -> usize {
+    if data_len <= 32 * 1024 {
+        return data_len; // small file: single chunk (no overhead)
+    }
+    // Target ~64 chunks, rounded to power of 2
+    let target = data_len / 64;
+    // Round up to next power of 2
+    let mut chunk = 4096; // minimum 4KB
+    while chunk < target && chunk < 1024 * 1024 {
+        chunk *= 2;
+    }
+    chunk
 }
 
 fn main() {
@@ -109,9 +141,19 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
     } else {
         // Compress
         let raw_comp = if cli.zlib { RawCompressor::Zlib } else { RawCompressor::None };
-        let compressed = if let Some(chunk_size) = cli.chunk_size {
-            encode_chunked(&input_data, raw_comp, chunk_size)
-        } else if let Some(stride) = cli.record_size {
+        let compressed = if let Some(ref cs) = cli.chunk_size {
+            let chunk_size = if cs == "auto" {
+                auto_chunk_size(input_data.len())
+            } else {
+                parse_size(cs)?
+            };
+            if chunk_size >= input_data.len() {
+                encode(&input_data, raw_comp)
+            } else {
+                encode_chunked(&input_data, raw_comp, chunk_size)
+            }
+        } else if let Some(ref stride_str) = cli.record_size {
+            let stride = parse_size(stride_str)?;
             encode_auto(&input_data, raw_comp, &[stride])
         } else {
             encode(&input_data, raw_comp)
