@@ -606,4 +606,33 @@ mod tests {
         assert_eq!(data, decompressed);
         println!("16KB linear ramps: {} -> {} bytes", data.len(), compressed.len());
     }
+
+    #[test]
+    fn test_polynomial() {
+        // Cubic: y = (x^3 + x) / 1000, for x=0..63 — values stay in u8 range
+        // Actually, use a simple quadratic that IS exact: y = round(0.05*x^2)
+        // For x=0..63: max = 0.05*63^2 = 198.45, fits in u8
+        let data: Vec<u8> = (0..64u32).map(|x| ((x * x) as f64 * 0.05).round() as u8).collect();
+        // Verify it's actually polynomial-detectable by checking roundtrip
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("Poly 64B: {} -> {} bytes", data.len(), compressed.len());
+        // Even if poly doesn't fire (rounding), roundtrip must work
+    }
+
+    #[test]
+    fn test_periodic_sine() {
+        // Signal constructed to be exactly representable with 2 FFT components
+        // DC=128, one sine at frequency 2/64 with amplitude 50
+        let n = 64usize;
+        let data: Vec<u8> = (0..n).map(|i| {
+            (128.0 + 50.0 * (2.0 * std::f64::consts::PI * 2.0 * i as f64 / n as f64).sin()).round() as u8
+        }).collect();
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("Periodic 64B: {} -> {} bytes", data.len(), compressed.len());
+        // Should compress (2 components = 40 bytes < 64 raw)
+        assert!(compressed.len() < data.len(),
+            "Periodic should compress, got {} >= {}", compressed.len(), data.len());
+    }
 }

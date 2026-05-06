@@ -291,6 +291,202 @@ fn detect_delta_f64(track: &[u8]) -> Option<TrackParams> {
     })
 }
 
+/// Compute real DFT of integer data (rfft equivalent).
+/// Returns (real, imag) arrays of length n/2+1.
+fn rfft(data: &[u8]) -> (Vec<f64>, Vec<f64>) {
+    let n = data.len();
+    let fft_len = n / 2 + 1;
+    let mut real = vec![0.0f64; fft_len];
+    let mut imag = vec![0.0f64; fft_len];
+
+    for k in 0..fft_len {
+        for t in 0..n {
+            let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
+            real[k] += data[t] as f64 * angle.cos();
+            imag[k] -= data[t] as f64 * angle.sin();
+        }
+    }
+    (real, imag)
+}
+
+/// Inverse real DFT — reconstruct n samples from rfft components.
+fn irfft_reconstruct(real: &[f64], imag: &[f64], n: usize) -> Vec<u8> {
+    let mut result = Vec::with_capacity(n);
+    for t in 0..n {
+        let mut sum = real[0]; // DC (not doubled)
+        for k in 1..real.len() - 1 {
+            let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
+            sum += 2.0 * (real[k] * angle.cos() - imag[k] * angle.sin());
+        }
+        // Nyquist (not doubled if n is even)
+        if n % 2 == 0 && real.len() > 1 {
+            let k = real.len() - 1;
+            let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
+            sum += real[k] * angle.cos() - imag[k] * angle.sin();
+        }
+        result.push((sum / n as f64).round() as u8);
+    }
+    result
+}
+
+fn detect_periodic(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 16 {
+        return None;
+    }
+
+    let (real, imag) = rfft(track);
+    let fft_len = real.len();
+
+    // Compute magnitudes and sort by descending magnitude
+    let mut mag_indices: Vec<(usize, f64)> = (0..fft_len)
+        .map(|k| (k, (real[k] * real[k] + imag[k] * imag[k]).sqrt()))
+        .collect();
+    mag_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+    // Try keeping progressively more components until exact reconstruction
+    for num_keep in 1..std::cmp::min(fft_len, n / 4) {
+        let kept: Vec<usize> = mag_indices[..num_keep].iter().map(|&(k, _)| k).collect();
+
+        // Build sparse rfft
+        let mut sparse_real = vec![0.0f64; fft_len];
+        let mut sparse_imag = vec![0.0f64; fft_len];
+        for &k in &kept {
+            sparse_real[k] = real[k];
+            sparse_imag[k] = imag[k];
+        }
+
+        let reconstructed = irfft_reconstruct(&sparse_real, &sparse_imag, n);
+        if reconstructed == track {
+            // Cost: 4 bytes header + 18 bytes per component
+            let cost = 4 + num_keep * 18;
+            if cost < n {
+                let components: Vec<(u16, f64, f64)> = kept.iter()
+                    .map(|&k| (k as u16, real[k], imag[k]))
+                    .collect();
+                return Some(TrackParams::Periodic { components, n: n as u16 });
+            }
+            return None; // exact but not worth it
+        }
+    }
+    None
+}
+
+fn detect_poly(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 4 {
+        return None;
+    }
+
+    // Try polynomial degrees 2 through 8
+    for degree in 2..=std::cmp::min(8, n - 1) {
+        if let Some(coeffs) = polyfit_exact(track, degree) {
+            // Cost: 1 byte (degree) + (degree+1)*8 bytes (f64 coefficients)
+            let cost = 1 + (degree + 1) * 8;
+            if cost < n {
+                return Some(TrackParams::Poly {
+                    degree: degree as u8,
+                    coeffs,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Fit a polynomial of given degree to the track data.
+/// Returns coefficients [c_d, c_{d-1}, ..., c_0] (highest degree first) if exact.
+fn polyfit_exact(track: &[u8], degree: usize) -> Option<Vec<f64>> {
+    let n = track.len();
+    if degree >= n {
+        return None;
+    }
+
+    // Build Vandermonde system and solve via Gaussian elimination
+    let m = degree + 1;
+    // Normal equations: (X^T X) c = X^T y
+    // X[i][j] = i^(degree-j) for row i, col j
+    let mut ata = vec![0.0f64; m * m];
+    let mut aty = vec![0.0f64; m];
+
+    for i in 0..n {
+        let x = i as f64;
+        let y = track[i] as f64;
+        // Compute powers of x
+        let mut powers = vec![1.0f64; m];
+        for j in 1..m {
+            powers[j] = powers[j - 1] * x;
+        }
+        // powers[j] = x^j, but we want coefficient order [x^d, x^(d-1), ..., x^0]
+        // So basis[col] = x^(degree - col)
+        for col in 0..m {
+            let basis_col = powers[degree - col];
+            aty[col] += basis_col * y;
+            for row in 0..m {
+                let basis_row = powers[degree - row];
+                ata[row * m + col] += basis_row * basis_col;
+            }
+        }
+    }
+
+    // Solve via Gaussian elimination with partial pivoting
+    let mut aug = vec![0.0f64; m * (m + 1)];
+    for i in 0..m {
+        for j in 0..m {
+            aug[i * (m + 1) + j] = ata[i * m + j];
+        }
+        aug[i * (m + 1) + m] = aty[i];
+    }
+
+    for col in 0..m {
+        // Partial pivot
+        let mut max_row = col;
+        let mut max_val = aug[col * (m + 1) + col].abs();
+        for row in (col + 1)..m {
+            let val = aug[row * (m + 1) + col].abs();
+            if val > max_val {
+                max_val = val;
+                max_row = row;
+            }
+        }
+        if max_val < 1e-12 {
+            return None; // singular
+        }
+        if max_row != col {
+            for j in 0..=(m) {
+                aug.swap(col * (m + 1) + j, max_row * (m + 1) + j);
+            }
+        }
+        let pivot = aug[col * (m + 1) + col];
+        for j in col..=(m) {
+            aug[col * (m + 1) + j] /= pivot;
+        }
+        for row in 0..m {
+            if row == col { continue; }
+            let factor = aug[row * (m + 1) + col];
+            for j in col..=(m) {
+                aug[row * (m + 1) + j] -= factor * aug[col * (m + 1) + j];
+            }
+        }
+    }
+
+    let coeffs: Vec<f64> = (0..m).map(|i| aug[i * (m + 1) + m]).collect();
+
+    // Verify exact reconstruction
+    for i in 0..n {
+        let x = i as f64;
+        let mut val = 0.0f64;
+        for (j, &c) in coeffs.iter().enumerate() {
+            val += c * x.powi((degree - j) as i32);
+        }
+        if val.round() as i64 != track[i] as i64 {
+            return None;
+        }
+    }
+
+    Some(coeffs)
+}
+
 pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_const(track) {
         return TrackEncoding { pattern: PatternType::Const, params, track_idx };
@@ -332,6 +528,12 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     }
     if let Some(params) = detect_delta(track) {
         return TrackEncoding { pattern: PatternType::Delta, params, track_idx };
+    }
+    if let Some(params) = detect_periodic(track) {
+        return TrackEncoding { pattern: PatternType::Periodic, params, track_idx };
+    }
+    if let Some(params) = detect_poly(track) {
+        return TrackEncoding { pattern: PatternType::Poly, params, track_idx };
     }
 
     TrackEncoding {
