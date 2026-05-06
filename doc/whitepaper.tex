@@ -332,6 +332,46 @@ PSE protects:
 
 \textbf{Not acceptable for:} Any scenario requiring IND-CPA semantic security, or where the pattern type itself reveals sensitive information.
 
+\section{Image Codec (PLTI)}
+
+The platter model extends naturally to 2D image compression by treating each image row as a track. The PLTI codec supports both lossless and lossy modes for 8-bit and 16-bit grayscale imagery.
+
+\subsection{Lossy Mode}
+
+In lossy mode, each row is fit with the simplest function whose maximum per-pixel error does not exceed a quality threshold $q$:
+\begin{enumerate}
+\item CONST --- mean value (flat regions, dark frames)
+\item LINEAR --- least-squares line (illumination gradients)
+\item POLY2/POLY3 --- quadratic/cubic fit (vignetting, smooth curves)
+\item RAW --- uncompressed fallback (textured regions)
+\end{enumerate}
+
+Cross-row optimization groups rows with identical encodings into a single meta-descriptor. For star field images where 95\%+ of rows are all-black, the entire frame compresses to a single meta-group.
+
+\subsection{Results}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Image type} & \textbf{Original} & \textbf{Compressed} & \textbf{Ratio} \\
+\midrule
+Star field 256$\times$64 (8-bit, $q$=5) & 16,384 B & 930 B & 17.6:1 \\
+Illumination gradient 512$\times$16 ($q$=2) & 8,192 B & 72 B & 113:1 \\
+Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
+\bottomrule
+\end{tabular}
+\caption{PLTI lossy compression on space-relevant imagery.}
+\end{table}
+
+\subsection{Target Applications}
+
+\textbf{Space probe cameras:} Star fields (95\% black background), calibration dark frames (near-constant), flat fields (polynomial vignetting), illumination gradients. These image types are dominated by mathematical structure that PLTI exploits directly.
+
+\textbf{Security/surveillance cameras:} Static scenes where 90--99\% of pixels do not change between frames. Difference frames (current minus reference) become arrays of zeros with sparse motion residuals. Static difference frames compress to $\sim$100 bytes regardless of resolution. Only frames containing actual motion require significant storage.
+
+\textbf{Scientific imaging:} Thermal cameras (smooth temperature gradients), spectrograms (periodic structure per row), oscilloscope captures (waveforms are mathematical functions by definition).
+
 \section{Limitations and Future Work}
 
 \textbf{Current limitations:}
@@ -353,6 +393,6 @@ PSE protects:
 
 \section{Conclusion}
 
-PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, compressing parameter metadata across tracks, and optionally encrypting only the minimal parameter bytes, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The columnar pre-processing transform extends this advantage to record-oriented data, and the structured encryption scheme demonstrates that compression and encryption need not be mutually exclusive when the security model permits metadata leakage.
+PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, compressing parameter metadata across tracks, and optionally encrypting only the minimal parameter bytes, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The columnar pre-processing transform extends this advantage to record-oriented data, the structured encryption scheme demonstrates that compression and encryption need not be mutually exclusive, and the PLTI image codec achieves 17--113$\times$ compression on space-relevant imagery by exploiting the mathematical structure inherent in calibration frames, star fields, and illumination gradients.
 
 \end{document}

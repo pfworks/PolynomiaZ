@@ -121,7 +121,8 @@ rust/src/
 ├── codec.rs         — Binary encode/decode, adaptive geometry, multi-platter
 ├── columnar.rs      — Columnar pre-processing transform
 ├── cross_track.rs   — Cross-track meta-descriptor optimization
-└── encrypt.rs       — Structured encryption (⚠️ demo)
+├── encrypt.rs       — Structured encryption (⚠️ demo)
+└── image.rs         — Image codec (lossless + lossy, 8/16-bit)
 
 tests/
 ├── test_codec.py    — Python round-trip tests
@@ -209,3 +210,35 @@ PLTZ Structured Encryption (PSE) encrypts pattern *parameters* while preserving 
 **Acceptable for:** IoT telemetry where schema is public but values are private, satellite housekeeping with public frame structure, sensor networks with known measurement cadence.
 
 **Not acceptable for:** Any scenario requiring semantic security (IND-CPA), or where pattern type itself is sensitive.
+
+---
+
+## Image Codec (PLTI)
+
+Lossless and lossy compression for grayscale images (8-bit and 16-bit). Each image row is treated as a track and fit with mathematical functions.
+
+### Lossy Mode
+
+Quality parameter (0=lossless, 1-255=max per-pixel error):
+
+```bash
+# In code:
+let params = ImageParams { width: 1024, height: 1024, bit_depth: 16, quality: 5 };
+let compressed = compress_image(&pixels, params);
+```
+
+### Results
+
+| Image type | Original | Compressed | Ratio |
+|-----------|----------|-----------|-------|
+| Star field 256×64 (8-bit, q=5) | 16KB | 930B | 17.6:1 |
+| Illumination gradient 512×16 | 8KB | 72B | 113:1 |
+| Dark calibration frame 128×32 (16-bit, q=4) | 8KB | 95B | 86:1 |
+
+### Target Applications
+
+**Space probe cameras** — Star fields (95% black), calibration frames (near-constant), illumination gradients (polynomial per row).
+
+**Security/surveillance cameras** — Static scenes where 90-99% of pixels don't change between frames. Difference frames become CONST(0) rows → extreme compression on "nothing happening" footage.
+
+**Scientific imaging** — Thermal cameras, spectrograms, oscilloscope captures. Mathematically structured by nature.

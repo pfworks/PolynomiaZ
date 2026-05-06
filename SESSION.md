@@ -143,7 +143,8 @@ rust/src/
 ├── codec.rs         — Binary encode/decode, adaptive geometry, multi-platter
 ├── columnar.rs      — Columnar pre-processing transform
 ├── cross_track.rs   — Cross-track meta-descriptor optimization
-└── encrypt.rs       — Structured encryption (⚠️ demo)
+├── encrypt.rs       — Structured encryption (⚠️ demo)
+└── image.rs         — Image codec (lossless + lossy, 8/16-bit)
 
 tests/
 ├── test_codec.py    — Python round-trip tests
@@ -224,3 +225,25 @@ where schema is public. NOT acceptable for IND-CPA requirements.
 
 **Production path:** Replace `stream_cipher()` with ChaCha20-Poly1305 or AES-256-GCM.
 Add authentication tags. Add key derivation (HKDF). Add nonce management.
+
+### Image Codec (PLTI)
+
+Added `image.rs` — lossless and lossy compression for 8/16-bit grayscale images.
+Each row = one track. Lossy mode fits rows with CONST/LINEAR/POLY2/POLY3 within
+a configurable per-pixel error threshold. Cross-row grouping merges identical rows.
+
+**Results (lossy):**
+- Star field 256×64 (q=5): 16KB → 930B (17.6:1)
+- Illumination gradient 512×16 (q=2): 8KB → 72B (113:1)
+- Dark calibration frame 128×32 16-bit (q=4): 8KB → 95B (86:1)
+
+**Target applications:**
+- Space probe cameras: star fields (95% black), calibration frames, gradients
+- Security/surveillance: static scenes where difference frames are mostly zero
+- Scientific imaging: thermal cameras, spectrograms, oscilloscope captures
+
+**Security camera use case:** For a static hallway camera, difference frames between
+consecutive frames are almost entirely zero (nothing moved). Each difference frame
+compresses to ~100 bytes (all rows CONST(0) in one meta-group). Only frames with
+actual motion have significant data. This could reduce storage 10-50× vs H.264 on
+the static portions of 24/7 surveillance footage.
