@@ -79,6 +79,9 @@ pltz -c file.bin        # compress to stdout
 pltz -z file.bin        # enable deflate fallback for raw tracks
 pltz -t file.bin.pltz   # test integrity
 pltz -v file.bin        # verbose output
+pltz -r 21 file.bin     # columnar pre-processing (stride=21 bytes)
+pltz -C 64k file.bin    # chunked mode (64KB chunks, per-section geometry)
+pltz -C auto file.bin   # auto-detect chunk size
 cat data | pltz -c | pltz -dc   # pipe round-trip
 ```
 
@@ -173,9 +176,9 @@ Per platter:
 - [x] bzip2-style CLI
 - [x] Columnar pre-processing (`pltz -r <stride>`)
 - [x] Structured encryption (demo — see below)
-- [ ] Per-section geometry (different sector sizes for different regions)
-- [ ] Streaming/chunked encoding for large files
-- [ ] File format versioning and magic number registry
+- [x] Per-section geometry (chunked mode, each chunk gets optimal geometry)
+- [x] Streaming/chunked encoding (`pltz -C 64k` or `pltz -C auto`)
+- [x] File format versioning (PLTS v2 header)
 
 ---
 

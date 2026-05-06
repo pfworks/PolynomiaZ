@@ -191,9 +191,11 @@ Per platter:
 - [x] Technical whitepaper
 - [x] Columnar pre-processing (`pltz -r <stride>`)
 - [x] Structured encryption (demo — NOT production-ready)
-- [ ] Per-section geometry (different sector sizes for different regions)
-- [ ] Streaming/chunked encoding for large files
-- [ ] File format versioning
+- [x] Per-section geometry (chunked mode, each chunk gets optimal geometry)
+- [x] Streaming/chunked encoding (`pltz -C 64k` or `pltz -C auto`)
+- [x] File format versioning (PLTS v2 header)
+- [x] Human-readable size arguments (64k, 1M, auto)
+- [x] Image codec (PLTI) for space/surveillance cameras
 
 ### Columnar Pre-Processing
 
