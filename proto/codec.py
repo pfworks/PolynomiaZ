@@ -124,6 +124,18 @@ def _encode_track_binary(enc: TrackEncoding, sectors: int) -> bytes:
         # width (uint8), count (uint16), start (int64), step (int64)
         return tag + struct.pack("<BHqq", p["width"], p["count"], p["start"], p["step"])
 
+    elif enc.pattern == PatternType.LINEAR_F64:
+        # count (uint16), start (float64), step (float64)
+        return tag + struct.pack("<Hdd", p["count"], p["start"], p["step"])
+
+    elif enc.pattern == PatternType.DELTA_F64:
+        # count (uint16), start (float64), deltas as float32
+        deltas = p["deltas_f32"]
+        buf2 = tag + struct.pack("<Hd", p["count"], p["start"])
+        for d in deltas:
+            buf2 += struct.pack("<f", d)
+        return buf2
+
     elif enc.pattern == PatternType.RAW:
         raw_bytes = bytes(p["data"])
         compressed = _compress_raw(raw_bytes)
@@ -223,6 +235,28 @@ def _decode_track_binary(buf: bytes, offset: int, sectors: int) -> Tuple[int, Li
             else:
                 track.extend(struct.pack("<H", val))
         return track_idx, track[:sectors], offset
+
+    elif tag == PatternType.LINEAR_F64:
+        count, start, step = struct.unpack_from("<Hdd", buf, offset)
+        offset += 18
+        track = []
+        for i in range(count):
+            val = start + i * step
+            track.extend(struct.pack("<d", val))
+        return track_idx, list(track[:sectors]), offset
+
+    elif tag == PatternType.DELTA_F64:
+        count, start = struct.unpack_from("<Hd", buf, offset)
+        offset += 10
+        track = []
+        current = start
+        track.extend(struct.pack("<d", current))
+        for i in range(count - 1):
+            delta, = struct.unpack_from("<f", buf, offset)
+            offset += 4
+            current += delta
+            track.extend(struct.pack("<d", current))
+        return track_idx, list(track[:sectors]), offset
 
     elif tag == PatternType.RAW:
         track = list(buf[offset:offset + sectors])

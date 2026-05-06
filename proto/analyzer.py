@@ -28,7 +28,9 @@ class PatternType(IntEnum):
     PERIODIC = 5
     POLY = 6
     RAW = 7
-    LINEAR_WIDE = 9  # Linear pattern on 16/32-bit words
+    LINEAR_WIDE = 9   # Linear pattern on 16/32-bit words
+    LINEAR_F64 = 10   # Linear pattern on f64 values
+    DELTA_F64 = 11    # Small deltas between consecutive f64 values
 
 
 @dataclass
@@ -165,6 +167,68 @@ def _detect_wide(track: List[int]) -> Optional[tuple]:
     return None
 
 
+def _detect_f64(track: List[int]) -> Optional[tuple]:
+    """Detect patterns in f64 (double) values: linear sequences or small deltas."""
+    import struct as st
+    n = len(track)
+    raw = bytes(track)
+
+    if n < 16 or n % 8 != 0:
+        return None
+
+    count = n // 8
+    doubles = [st.unpack_from("<d", raw, i * 8)[0] for i in range(count)]
+
+    # Check for NaN/Inf
+    if any(d != d or abs(d) == float('inf') for d in doubles):
+        return None
+
+    # Try linear f64: check if step is constant
+    if count >= 2:
+        step = doubles[1] - doubles[0]
+        is_linear = True
+        for i in range(2, count):
+            if abs((doubles[i] - doubles[i-1]) - step) > abs(step) * 1e-12 + 1e-15:
+                is_linear = False
+                break
+        if is_linear and 16 < n:
+            # Verify byte-exact reconstruction
+            recon_bytes = b''.join(st.pack('<d', doubles[0] + i * step) for i in range(count))
+            if recon_bytes == raw:
+                return (PatternType.LINEAR_F64, {"start": doubles[0], "step": step, "count": count})
+
+    # Try delta f64: store first value + deltas as f32 (if precision allows)
+    deltas = [doubles[i] - doubles[i-1] for i in range(1, count)]
+    f32_ok = True
+    for d in deltas:
+        if abs(d) > 3.4e38:  # f32 max
+            f32_ok = False
+            break
+        f32_val = st.unpack('<f', st.pack('<f', d))[0]
+        if abs(f32_val - d) > abs(d) * 1e-6 + 1e-30:
+            f32_ok = False
+            break
+
+    if f32_ok:
+        # Cost: 8 (start f64) + (count-1)*4 (f32 deltas) vs raw n bytes
+        cost = 8 + (count - 1) * 4
+        if cost < n:
+            # Verify exact reconstruction
+            reconstructed = [doubles[0]]
+            current = doubles[0]
+            for d in deltas:
+                f32_d = st.unpack('<f', st.pack('<f', d))[0]
+                current += f32_d
+                reconstructed.append(current)
+            # Check byte-exact reconstruction
+            orig_bytes = raw
+            recon_bytes = b''.join(st.pack('<d', v) for v in reconstructed)
+            if orig_bytes == recon_bytes:
+                return (PatternType.DELTA_F64, {"start": doubles[0], "deltas_f32": deltas, "count": count})
+
+    return None
+
+
 def analyze_track(track: List[int], track_idx: int) -> TrackEncoding:
     """Analyze a single track and return its most compact encoding."""
     result = detect_const(track)
@@ -176,15 +240,27 @@ def analyze_track(track: List[int], track_idx: int) -> TrackEncoding:
         return TrackEncoding(PatternType.LINEAR, result, track_idx)
 
     result = detect_rle(track)
-    if result:
+    result_repeat = detect_repeat(track)
+
+    # Pick the smaller of RLE vs REPEAT if both match
+    if result and result_repeat:
+        rle_cost = 2 + len(result["runs"]) * 2
+        repeat_cost = 2 + len(result_repeat["pattern"])
+        if repeat_cost <= rle_cost:
+            return TrackEncoding(PatternType.REPEAT, result_repeat, track_idx)
+        else:
+            return TrackEncoding(PatternType.RLE, result, track_idx)
+    elif result:
         return TrackEncoding(PatternType.RLE, result, track_idx)
+    elif result_repeat:
+        return TrackEncoding(PatternType.REPEAT, result_repeat, track_idx)
 
-    result = detect_repeat(track)
-    if result:
-        return TrackEncoding(PatternType.REPEAT, result, track_idx)
-
-    # Try wide-word analysis (interpret bytes as 16/32-bit integers)
+    # Try wide-word analysis (interpret bytes as 16/32/64-bit values)
     result = _detect_wide(track)
+    if result:
+        return TrackEncoding(result[0], result[1], track_idx)
+
+    result = _detect_f64(track)
     if result:
         return TrackEncoding(result[0], result[1], track_idx)
 
