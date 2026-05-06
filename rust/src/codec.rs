@@ -11,6 +11,7 @@ use std::io::{Read, Write};
 
 const MAGIC: &[u8; 4] = b"PLTZ";
 const MAGIC_COLUMNAR: &[u8; 4] = b"PLTC"; // Columnar-transformed variant
+const FORMAT_VERSION: u8 = 2; // v2: adds version byte, streaming support
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawCompressor {
@@ -43,6 +44,76 @@ pub fn encode_auto(data: &[u8], raw_compressor: RawCompressor, strides: &[usize]
     }
 
     best
+}
+
+/// Streaming/chunked encoding: splits data into fixed-size chunks, compresses
+/// each independently (with its own optimal geometry = per-section geometry).
+///
+/// Format (PLTS):
+///   [4] Magic "PLTS"
+///   [1] Format version
+///   [4] Original data length (uint32 LE)
+///   [4] Chunk size (uint32 LE)
+///   [2] Number of chunks (uint16 LE)
+///   Per chunk:
+///     [4] Compressed chunk length (uint32 LE)
+///     [...] PLTZ-encoded chunk (independent, own geometry)
+pub fn encode_chunked(data: &[u8], raw_compressor: RawCompressor, chunk_size: usize) -> Vec<u8> {
+    let num_chunks = if data.is_empty() { 0 } else { (data.len() + chunk_size - 1) / chunk_size };
+
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"PLTS");
+    buf.push(FORMAT_VERSION);
+    buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&(chunk_size as u32).to_le_bytes());
+    buf.extend_from_slice(&(num_chunks as u16).to_le_bytes());
+
+    for i in 0..num_chunks {
+        let start = i * chunk_size;
+        let end = std::cmp::min(start + chunk_size, data.len());
+        let chunk = &data[start..end];
+        let compressed_chunk = encode(chunk, raw_compressor);
+        buf.extend_from_slice(&(compressed_chunk.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&compressed_chunk);
+    }
+
+    buf
+}
+
+/// Decode a chunked/streaming format.
+pub fn decode_chunked(compressed: &[u8]) -> Result<Vec<u8>, String> {
+    if compressed.len() < 15 || &compressed[0..4] != b"PLTS" {
+        return Err("Bad streaming magic".into());
+    }
+
+    let version = compressed[4];
+    if version > FORMAT_VERSION {
+        return Err(format!("Unsupported format version {} (max {})", version, FORMAT_VERSION));
+    }
+
+    let original_len = u32::from_le_bytes(compressed[5..9].try_into().unwrap()) as usize;
+    let _chunk_size = u32::from_le_bytes(compressed[9..13].try_into().unwrap()) as usize;
+    let num_chunks = u16::from_le_bytes(compressed[13..15].try_into().unwrap()) as usize;
+
+    let mut result = Vec::with_capacity(original_len);
+    let mut offset = 15;
+
+    for _ in 0..num_chunks {
+        if offset + 4 > compressed.len() {
+            return Err("Truncated chunk header".into());
+        }
+        let chunk_len = u32::from_le_bytes(compressed[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        if offset + chunk_len > compressed.len() {
+            return Err("Truncated chunk data".into());
+        }
+        let chunk_data = decode(&compressed[offset..offset + chunk_len])?;
+        result.extend_from_slice(&chunk_data);
+        offset += chunk_len;
+    }
+
+    result.truncate(original_len);
+    Ok(result)
 }
 
 /// Encode (compress) data into PLTZ binary format.
@@ -81,10 +152,15 @@ pub fn encode(data: &[u8], raw_compressor: RawCompressor) -> Vec<u8> {
     buf
 }
 
-/// Decode (decompress) PLTZ or PLTC binary format back to original data.
+/// Decode (decompress) PLTZ, PLTC, or PLTS binary format back to original data.
 pub fn decode(compressed: &[u8]) -> Result<Vec<u8>, String> {
     if compressed.len() < 10 {
         return Err("Too short".into());
+    }
+
+    // Check for streaming format
+    if &compressed[0..4] == b"PLTS" {
+        return decode_chunked(compressed);
     }
 
     // Check for columnar wrapper
@@ -634,5 +710,46 @@ mod tests {
         // Should compress (2 components = 40 bytes < 64 raw)
         assert!(compressed.len() < data.len(),
             "Periodic should compress, got {} >= {}", compressed.len(), data.len());
+    }
+
+    #[test]
+    fn test_chunked_roundtrip() {
+        // Large data: 64KB of mixed content
+        let mut data = Vec::new();
+        data.extend(vec![0xFFu8; 16384]); // constant
+        data.extend((0..=255u8).cycle().take(16384)); // linear ramps
+        let mut state: u32 = 42;
+        for _ in 0..32768 {
+            state = state.wrapping_mul(1103515245).wrapping_add(12345);
+            data.push((state >> 16) as u8);
+        }
+
+        // Chunked with 16KB chunks (each chunk gets its own geometry)
+        let compressed = encode_chunked(&data, RawCompressor::None, 16384);
+        let decompressed = decode(&compressed).unwrap();
+        assert_eq!(data, decompressed);
+        println!("Chunked 64KB (16KB chunks): {} -> {} bytes", data.len(), compressed.len());
+    }
+
+    #[test]
+    fn test_chunked_with_zlib() {
+        let mut data = vec![0u8; 1000];
+        let mut state: u32 = 99;
+        for b in data.iter_mut() {
+            state = state.wrapping_mul(1103515245).wrapping_add(12345);
+            *b = (state >> 16) as u8;
+        }
+        let compressed = encode_chunked(&data, RawCompressor::Zlib, 512);
+        let decompressed = decode(&compressed).unwrap();
+        assert_eq!(data, decompressed);
+    }
+
+    #[test]
+    fn test_format_version() {
+        // Verify PLTS header contains version byte
+        let data = vec![0xABu8; 1024];
+        let compressed = encode_chunked(&data, RawCompressor::None, 512);
+        assert_eq!(&compressed[0..4], b"PLTS");
+        assert_eq!(compressed[4], 2); // FORMAT_VERSION
     }
 }

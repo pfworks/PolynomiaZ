@@ -331,7 +331,8 @@ fn irfft_reconstruct(real: &[f64], imag: &[f64], n: usize) -> Vec<u8> {
 
 fn detect_periodic(track: &[u8]) -> Option<TrackParams> {
     let n = track.len();
-    if n < 16 {
+    if n < 16 || n > 128 {
+        return None; // DFT is O(n²); skip large tracks
         return None;
     }
 

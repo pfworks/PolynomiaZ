@@ -1,5 +1,5 @@
 use clap::Parser;
-use pltz::codec::{decode, encode, encode_auto, RawCompressor};
+use pltz::codec::{decode, encode, encode_auto, encode_chunked, RawCompressor};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::process;
@@ -35,6 +35,10 @@ struct Cli {
     /// Columnar pre-processing with given record stride (bytes)
     #[arg(short = 'r', long = "record-size")]
     record_size: Option<usize>,
+
+    /// Chunked/streaming mode with given chunk size (bytes)
+    #[arg(short = 'C', long = "chunk-size")]
+    chunk_size: Option<usize>,
 
     /// Test integrity (decompress and discard)
     #[arg(short, long)]
@@ -105,7 +109,9 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
     } else {
         // Compress
         let raw_comp = if cli.zlib { RawCompressor::Zlib } else { RawCompressor::None };
-        let compressed = if let Some(stride) = cli.record_size {
+        let compressed = if let Some(chunk_size) = cli.chunk_size {
+            encode_chunked(&input_data, raw_comp, chunk_size)
+        } else if let Some(stride) = cli.record_size {
             encode_auto(&input_data, raw_comp, &[stride])
         } else {
             encode(&input_data, raw_comp)
