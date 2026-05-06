@@ -186,7 +186,39 @@ Per platter:
 - [x] Multi-platter splitting
 - [x] Configurable deflate fallback
 - [x] Technical whitepaper
-- [ ] Pre-processing transforms (de-interleaving, columnar)
+- [x] Columnar pre-processing (`pltz -r <stride>`)
+- [x] Structured encryption (demo — NOT production-ready)
 - [ ] Per-section geometry (different sector sizes for different regions)
 - [ ] Streaming/chunked encoding for large files
 - [ ] File format versioning
+
+### Columnar Pre-Processing
+
+Added `columnar.rs` — transposes record-oriented data (stride = record size) so each
+field is contiguous across all records. Exposed via `pltz -r <stride>` CLI flag and
+`encode_auto()` API. Uses PLTC magic to signal columnar wrapper in the format.
+
+Results on IoT telemetry (100 records × 21 bytes):
+- Plain PLTZ: 2189B (no patterns detected in interleaved data)
+- Columnar PLTZ (stride=21): 846B (fields become LINEAR_WIDE, CONST, DELTA)
+- Columnar PLTZ + zlib: 787B (competitive with zlib's 784B)
+
+### Structured Encryption (⚠️ DEMO ONLY)
+
+Added `encrypt.rs` — encrypts pattern parameters while preserving PLTZ structure.
+Uses PLTE magic. The stream cipher is a DEMO and is NOT cryptographically secure.
+
+**Concept:** Standard encryption destroys compressibility. PLTZ structured encryption
+encrypts only the minimal parameter bytes (start, step, etc.) while leaving pattern
+types visible. This preserves the compression ratio.
+
+**Results:**
+- 4KB linear ramp: 168B encrypted (vs 4096B with standard AES-CTR)
+- Compress-then-encrypt (zlib+AES): ~315B
+- PLTZ structured encrypt: 168B (2× better than compress-then-encrypt)
+
+**Security tradeoff:** Leaks pattern types and track layout. Acceptable for IoT/telemetry
+where schema is public. NOT acceptable for IND-CPA requirements.
+
+**Production path:** Replace `stream_cipher()` with ChaCha20-Poly1305 or AES-256-GCM.
+Add authentication tags. Add key derivation (HKDF). Add nonce management.

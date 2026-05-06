@@ -252,6 +252,86 @@ LZMA & Large dictionary + range coding & General purpose \\
 
 PLTZ occupies a unique niche: it recognizes \emph{semantic} structure (``this is a linear function'') rather than \emph{syntactic} structure (``these bytes appeared before''). The two approaches are complementary---PLTZ with a deflate fallback combines the strengths of both.
 
+\section{Columnar Pre-Processing}
+
+For record-oriented data (IoT telemetry, database rows, fixed-size structs), a columnar transform transposes the data so that each field position across all records is contiguous:
+
+\begin{lstlisting}
+Input (row-major):  [R0F0 R0F1 R0F2] [R1F0 R1F1 R1F2] ...
+Output (col-major): [R0F0 R1F0 R2F0 ...] [R0F1 R1F1 R2F1 ...] ...
+\end{lstlisting}
+
+This exposes per-field patterns that are invisible in row-major layout. For example, a batch of 100 IoT readings with fields (timestamp, device\_id, sequence, battery, temperature) becomes:
+\begin{itemize}
+\item Timestamp column: LINEAR\_WIDE (incrementing by sample interval)
+\item Device ID column: CONST (same device)
+\item Sequence column: LINEAR\_WIDE (incrementing by 1)
+\item Battery column: DELTA (slowly decreasing)
+\item Temperature column: DELTA (slowly varying)
+\end{itemize}
+
+The transform is invoked via \texttt{pltz -r <stride>} where stride is the record size in bytes. The format uses magic \texttt{PLTC} to signal that the inverse transform must be applied after decompression.
+
+\section{Structured Encryption}
+
+\begin{center}
+\fbox{\parbox{0.9\textwidth}{\textbf{WARNING:} The current implementation uses a simplified stream cipher for demonstration purposes only. It is NOT cryptographically secure. Production use requires a proper AEAD construction (ChaCha20-Poly1305 or AES-256-GCM).}}
+\end{center}
+
+\subsection{Motivation}
+
+Standard encryption and compression are fundamentally at odds:
+\begin{itemize}
+\item \textbf{Encrypt-then-compress}: Ciphertext is indistinguishable from random; no compression possible.
+\item \textbf{Compress-then-encrypt}: Compressed size leaks information about plaintext entropy (CRIME/BREACH attacks).
+\end{itemize}
+
+PLTZ Structured Encryption (PSE) offers a third option: encrypt only the \emph{parameter values} of detected patterns while leaving the pattern \emph{types} in the clear.
+
+\subsection{Scheme}
+
+\begin{enumerate}
+\item Analyze plaintext with PLTZ pattern detection
+\item For each track, serialize the pattern parameters (start, step, raw bytes, etc.)
+\item Encrypt the serialized parameters with a stream cipher keyed by the user's secret
+\item Store: pattern type (public) + encrypted parameters (secret)
+\end{enumerate}
+
+\subsection{Results}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{Approach} & \textbf{4KB linear ramp} & \textbf{Security} \\
+\midrule
+Encrypt-then-compress & 4,096 B & IND-CPA (full semantic security) \\
+Compress-then-encrypt & $\sim$315 B & Leaks compressed size \\
+\textbf{PLTZ structured encrypt} & \textbf{168 B} & Leaks pattern types \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of encryption+compression approaches.}
+\end{table}
+
+\subsection{Security Model}
+
+PSE intentionally leaks:
+\begin{itemize}
+\item Pattern types per track (e.g., ``track 5 is LINEAR'')
+\item Number of tracks and their grouping
+\item File size and geometry
+\end{itemize}
+
+PSE protects:
+\begin{itemize}
+\item Actual data values (encrypted parameters)
+\item Relationships between parameter values across tracks
+\end{itemize}
+
+\textbf{Acceptable for:} IoT telemetry where the measurement schema is public (everyone knows you send timestamp + battery + temperature) but the values are private. Satellite housekeeping where frame structure is in public ICD documents.
+
+\textbf{Not acceptable for:} Any scenario requiring IND-CPA semantic security, or where the pattern type itself reveals sensitive information.
+
 \section{Limitations and Future Work}
 
 \textbf{Current limitations:}
@@ -260,18 +340,19 @@ PLTZ occupies a unique niche: it recognizes \emph{semantic} structure (``this is
 \item Periodic and polynomial detection not yet in Rust (Python reference only)
 \item Slower than zlib due to adaptive geometry search (7 sector sizes $\times$ pattern detection)
 \item Cross-track requires $\geq$4 tracks with same pattern to activate
+\item Structured encryption uses demo cipher (not production-ready)
 \end{itemize}
 
 \textbf{Planned improvements:}
 \begin{itemize}
-\item Columnar pre-processing transform for record-oriented data
 \item Per-section geometry (different sector sizes for different regions)
 \item Streaming/chunked mode for large files
 \item File format versioning and magic number registry
+\item Production AEAD integration for structured encryption
 \end{itemize}
 
 \section{Conclusion}
 
-PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, and compressing parameter metadata across tracks, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The approach is complementary to existing compressors and is most effective when used as part of a hybrid pipeline or on data that is inherently mathematical in nature.
+PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, compressing parameter metadata across tracks, and optionally encrypting only the minimal parameter bytes, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The columnar pre-processing transform extends this advantage to record-oriented data, and the structured encryption scheme demonstrates that compression and encryption need not be mutually exclusive when the security model permits metadata leakage.
 
 \end{document}

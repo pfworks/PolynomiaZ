@@ -1,6 +1,13 @@
 /// Structured encryption: an encryption scheme whose ciphertext format
 /// is designed to be PLTZ-compressible.
 ///
+/// # ⚠️ DEMO ONLY — NOT FOR PRODUCTION USE
+///
+/// The stream cipher in this module is a simplified demonstration.
+/// It is NOT cryptographically secure. Production use requires replacing
+/// `stream_cipher()` with a proper AEAD construction (e.g., ChaCha20-Poly1305
+/// or AES-256-GCM) and adding authentication tags.
+///
 /// # Concept
 ///
 /// Standard encryption (AES-CTR, ChaCha20) produces ciphertext indistinguishable

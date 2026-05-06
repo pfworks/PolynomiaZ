@@ -168,7 +168,42 @@ Per platter:
 - [x] Wide-word analysis (16/32-bit integers, f64 doubles)
 - [x] Cross-track meta-descriptors
 - [x] bzip2-style CLI
-- [ ] Pre-processing transforms (de-interleaving, columnar)
+- [x] Columnar pre-processing (`pltz -r <stride>`)
+- [x] Structured encryption (demo — see below)
 - [ ] Per-section geometry (different sector sizes for different regions)
 - [ ] Streaming/chunked encoding for large files
 - [ ] File format versioning and magic number registry
+
+---
+
+## Columnar Pre-Processing
+
+For record-oriented data (IoT telemetry, database rows, fixed-size structs), the columnar transform groups each field across all records together, exposing per-field patterns:
+
+```bash
+pltz -r 21 telemetry.bin    # stride = record size in bytes
+```
+
+Without columnar, a batch of 100 IoT readings (2.1KB) looks random at the byte level. With columnar (stride = record size), timestamps become a LINEAR_WIDE track, device IDs become CONST, sequence numbers become LINEAR, etc.
+
+---
+
+## Structured Encryption (⚠️ DEMO)
+
+> **WARNING:** The encryption implementation uses a simplified stream cipher for demonstration purposes only. It is NOT cryptographically secure. Do not use for real data protection without replacing the cipher with a proper AEAD (ChaCha20-Poly1305 or AES-256-GCM).
+
+PLTZ Structured Encryption (PSE) encrypts pattern *parameters* while preserving the compressed structure:
+
+| Approach | 4KB linear ramp | Security |
+|----------|----------------|----------|
+| Encrypt-then-compress | 4,096B | IND-CPA (full) |
+| Compress-then-encrypt | ~315B | Leaks compressed size |
+| **PLTZ structured encrypt** | **168B** | Leaks pattern types |
+
+**How it works:** Analyze data → detect patterns → encrypt only the parameter values (start, step, etc.) → store pattern types in the clear with encrypted parameters.
+
+**What's leaked:** Pattern types and track layout (attacker sees "track 5 is LINEAR" but not the values).
+
+**Acceptable for:** IoT telemetry where schema is public but values are private, satellite housekeeping with public frame structure, sensor networks with known measurement cadence.
+
+**Not acceptable for:** Any scenario requiring semantic security (IND-CPA), or where pattern type itself is sensitive.
