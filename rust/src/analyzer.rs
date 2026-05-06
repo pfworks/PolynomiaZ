@@ -319,48 +319,57 @@ fn detect_delta_f64(track: &[u8]) -> Option<TrackParams> {
     })
 }
 
-/// Compute real DFT of integer data (rfft equivalent).
-/// Returns (real, imag) arrays of length n/2+1.
+/// Compute real FFT using rustfft. Returns (real, imag) arrays of length n/2+1.
 fn rfft(data: &[u8]) -> (Vec<f64>, Vec<f64>) {
+    use rustfft::{FftPlanner, num_complex::Complex};
+
     let n = data.len();
     let fft_len = n / 2 + 1;
-    let mut real = vec![0.0f64; fft_len];
-    let mut imag = vec![0.0f64; fft_len];
 
-    for k in 0..fft_len {
-        for t in 0..n {
-            let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
-            real[k] += data[t] as f64 * angle.cos();
-            imag[k] -= data[t] as f64 * angle.sin();
-        }
-    }
+    let mut planner = FftPlanner::<f64>::new();
+    let fft = planner.plan_fft_forward(n);
+
+    let mut buffer: Vec<Complex<f64>> = data.iter()
+        .map(|&b| Complex { re: b as f64, im: 0.0 })
+        .collect();
+
+    fft.process(&mut buffer);
+
+    let real: Vec<f64> = buffer[..fft_len].iter().map(|c| c.re).collect();
+    let imag: Vec<f64> = buffer[..fft_len].iter().map(|c| c.im).collect();
     (real, imag)
 }
 
-/// Inverse real DFT — reconstruct n samples from rfft components.
+/// Inverse real FFT — reconstruct n samples from rfft components.
 fn irfft_reconstruct(real: &[f64], imag: &[f64], n: usize) -> Vec<u8> {
-    let mut result = Vec::with_capacity(n);
-    for t in 0..n {
-        let mut sum = real[0]; // DC (not doubled)
-        for k in 1..real.len() - 1 {
-            let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
-            sum += 2.0 * (real[k] * angle.cos() - imag[k] * angle.sin());
+    use rustfft::{FftPlanner, num_complex::Complex};
+
+    let mut planner = FftPlanner::<f64>::new();
+    let ifft = planner.plan_fft_inverse(n);
+
+    // Build full complex spectrum from half-spectrum
+    let mut buffer: Vec<Complex<f64>> = Vec::with_capacity(n);
+    let fft_len = real.len(); // n/2 + 1
+    for k in 0..n {
+        if k < fft_len {
+            buffer.push(Complex { re: real[k], im: imag[k] });
+        } else {
+            // Mirror: X[n-k] = conj(X[k])
+            let mirror = n - k;
+            buffer.push(Complex { re: real[mirror], im: -imag[mirror] });
         }
-        // Nyquist (not doubled if n is even)
-        if n % 2 == 0 && real.len() > 1 {
-            let k = real.len() - 1;
-            let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
-            sum += real[k] * angle.cos() - imag[k] * angle.sin();
-        }
-        result.push((sum / n as f64).round() as u8);
     }
-    result
+
+    ifft.process(&mut buffer);
+
+    // IFFT result needs to be divided by n
+    buffer.iter().map(|c| (c.re / n as f64).round() as u8).collect()
 }
 
 fn detect_periodic(track: &[u8]) -> Option<TrackParams> {
     let n = track.len();
-    if n < 16 || n > 128 {
-        return None; // DFT is O(n²); skip large tracks
+    if n < 16 || n > 4096 {
+        return None; // skip very large tracks (diminishing returns)
     }
 
     let (real, imag) = rfft(track);
