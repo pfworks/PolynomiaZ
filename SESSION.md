@@ -203,6 +203,8 @@ Per platter:
 - [x] File format versioning (PLTS v2 header)
 - [x] Human-readable size arguments (64k, 1M, auto)
 - [x] Image codec (PLTI) for space/surveillance cameras
+- [x] `--analyze` flag (recommends optimal settings)
+- [x] `-b/--best` flag (auto-selects best compression)
 
 ### Columnar Pre-Processing
 

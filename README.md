@@ -89,6 +89,8 @@ pltz -v file.bin        # verbose output
 pltz -r 21 file.bin     # columnar pre-processing (stride=21 bytes)
 pltz -C 64k file.bin    # chunked mode (64KB chunks, per-section geometry)
 pltz -C auto file.bin   # auto-detect chunk size
+pltz -b file.bin        # auto-select best compression settings
+pltz --analyze file.bin # analyze data and recommend settings
 cat data | pltz -c | pltz -dc   # pipe round-trip
 ```
 

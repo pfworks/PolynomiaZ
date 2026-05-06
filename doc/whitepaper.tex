@@ -306,6 +306,8 @@ pltz -t file.bin.pltz   # test integrity
 pltz -r 21 file.bin     # columnar: input has 21-byte records
 pltz -C 64k file.bin    # chunked mode (per-section geometry)
 pltz -C auto file.bin   # auto-detect chunk size
+pltz -b file.bin        # auto-select best compression settings
+pltz --analyze file.bin # analyze data and recommend settings
 \end{lstlisting}
 
 The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 18 pattern types are implemented in pure Rust. The implementation includes 37 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption.
@@ -467,6 +469,7 @@ Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
 \item Streaming/chunked encoding (\texttt{pltz -C auto}): bounded memory, random access to individual chunks
 \item File format versioning: PLTS v2 header with version byte; decoder rejects unknown future versions
 \item Human-readable size arguments: \texttt{64k}, \texttt{1M}, \texttt{auto}
+\item Auto-optimization: \texttt{pltz -b} tries multiple configurations and picks the smallest output; \texttt{pltz --analyze} reports recommendations without compressing
 \end{itemize}
 
 \textbf{Future work:}
