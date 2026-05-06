@@ -45,6 +45,14 @@ struct Cli {
     #[arg(short, long)]
     test: bool,
 
+    /// Analyze data and recommend optimal settings
+    #[arg(long)]
+    analyze: bool,
+
+    /// Auto-select best compression settings
+    #[arg(short = 'b', long)]
+    best: bool,
+
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
@@ -111,6 +119,10 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
 
     let input_data = read_input(path)?;
 
+    if cli.analyze {
+        return analyze_data(path, &input_data);
+    }
+
     if decompress || cli.test {
         // Decompress
         let decompressed = decode(&input_data)?;
@@ -142,7 +154,9 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
     } else {
         // Compress
         let raw_comp = if cli.no_zlib { RawCompressor::None } else { RawCompressor::Zlib };
-        let compressed = if let Some(ref cs) = cli.chunk_size {
+        let compressed = if cli.best {
+            find_best_compression(&input_data)
+        } else if let Some(ref cs) = cli.chunk_size {
             let chunk_size = if cs == "auto" {
                 auto_chunk_size(input_data.len())
             } else {
@@ -199,6 +213,152 @@ fn output_path_decompress(path: &str) -> Result<String, String> {
     } else {
         Err(format!("can't guess original name for {} (no .pltz suffix)", path))
     }
+}
+
+fn find_best_compression(data: &[u8]) -> Vec<u8> {
+    use pltz::codec::RawCompressor;
+
+    let raw_comp = RawCompressor::Zlib;
+    let mut best = pltz::codec::encode(data, raw_comp);
+
+    // Try columnar strides
+    for &stride in &[4, 8, 12, 16, 20, 21, 24, 32, 48, 64, 128, 256, 512] {
+        if stride >= data.len() || stride < 2 { continue; }
+        let transformed = pltz::columnar::columnar_transform(data, stride);
+        let inner = pltz::codec::encode(&transformed, raw_comp);
+        let total_size = 10 + inner.len();
+        if total_size < best.len() {
+            let mut buf = Vec::with_capacity(total_size);
+            buf.extend_from_slice(b"PLTC");
+            buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            buf.extend_from_slice(&(stride as u16).to_le_bytes());
+            buf.extend_from_slice(&inner);
+            best = buf;
+        }
+    }
+
+    // Try chunked
+    for &chunk in &[4096, 8192, 16384, 32768, 65536] {
+        if chunk >= data.len() { continue; }
+        let compressed = pltz::codec::encode_chunked(data, raw_comp, chunk);
+        if compressed.len() < best.len() {
+            best = compressed;
+        }
+    }
+
+    best
+}
+
+fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
+    use pltz::codec::RawCompressor;
+    use pltz::platter::*;
+    use pltz::analyzer::*;
+    use pltz::cross_track::cross_track_optimize;
+    use std::collections::HashMap;
+
+    eprintln!("Analyzing {} ({} bytes)...", path, data.len());
+    eprintln!();
+
+    // 1. Try plain encode
+    let plain = pltz::codec::encode(data, RawCompressor::Zlib);
+    eprintln!("  Default:          {} bytes (ratio {:.3})", plain.len(), plain.len() as f64 / data.len() as f64);
+
+    // 2. Try various strides for columnar
+    let mut best_stride: Option<(usize, usize)> = None;
+    for &stride in &[4, 8, 12, 16, 20, 21, 24, 32, 48, 64, 128, 256, 512] {
+        if stride >= data.len() || stride < 2 { continue; }
+        let transformed = pltz::columnar::columnar_transform(data, stride);
+        let compressed = pltz::codec::encode(&transformed, RawCompressor::Zlib);
+        let total = 10 + compressed.len(); // PLTC header overhead
+        if best_stride.is_none() || total < best_stride.unwrap().1 {
+            best_stride = Some((stride, total));
+        }
+    }
+
+    if let Some((stride, size)) = best_stride {
+        if size < plain.len() {
+            eprintln!("  Columnar -r {}:   {} bytes (ratio {:.3})", stride, size, size as f64 / data.len() as f64);
+        }
+    }
+
+    // 3. Try chunked
+    let mut best_chunk: Option<(usize, usize)> = None;
+    for &chunk in &[4096, 8192, 16384, 32768, 65536] {
+        if chunk >= data.len() { continue; }
+        let compressed = pltz::codec::encode_chunked(data, RawCompressor::Zlib, chunk);
+        if best_chunk.is_none() || compressed.len() < best_chunk.unwrap().1 {
+            best_chunk = Some((chunk, compressed.len()));
+        }
+    }
+
+    if let Some((chunk, size)) = best_chunk {
+        if size < plain.len() {
+            let label = if chunk >= 1024 { format!("{}k", chunk / 1024) } else { format!("{}", chunk) };
+            eprintln!("  Chunked -C {}:  {} bytes (ratio {:.3})", label, size, size as f64 / data.len() as f64);
+        }
+    }
+
+    // 4. Pattern breakdown
+    eprintln!();
+    let geom = compute_geometry(data.len(), 256);
+    let tracks = lay_out(data, &geom);
+    let encodings = analyze_platter(&tracks);
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for enc in &encodings {
+        let name = match enc.pattern {
+            PatternType::Const => "CONST",
+            PatternType::Linear => "LINEAR",
+            PatternType::Rle => "RLE",
+            PatternType::Repeat => "REPEAT",
+            PatternType::Delta => "DELTA",
+            PatternType::Periodic => "PERIODIC",
+            PatternType::Poly => "POLY",
+            PatternType::LinearWide => "LINEAR_WIDE",
+            PatternType::LinearF64 => "LINEAR_F64",
+            PatternType::DeltaF64 => "DELTA_F64",
+            PatternType::XorMask => "XOR_MASK",
+            PatternType::Sparse => "SPARSE",
+            PatternType::PiecewiseLinear => "PIECEWISE_LINEAR",
+            PatternType::Mirror => "MIRROR",
+            PatternType::InterleavedLinear => "INTERLEAVED_LINEAR",
+            PatternType::Exponential => "EXPONENTIAL",
+            PatternType::DeltaRle => "DELTA_RLE",
+            PatternType::Raw | PatternType::RawCompressed => "RAW",
+        };
+        *counts.entry(name).or_insert(0) += 1;
+    }
+
+    eprintln!("  Pattern breakdown ({} tracks at spt=256):", encodings.len());
+    let mut sorted: Vec<_> = counts.iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(a.1));
+    for (name, count) in sorted {
+        eprintln!("    {:<20} {:>4} tracks", name, count);
+    }
+
+    // 5. Recommendation
+    eprintln!();
+    let mut best_size = plain.len();
+    let mut recommendation = String::from("pltz");
+
+    if let Some((stride, size)) = best_stride {
+        if size < best_size {
+            best_size = size;
+            recommendation = format!("pltz -r {}", stride);
+        }
+    }
+    if let Some((chunk, size)) = best_chunk {
+        if size < best_size {
+            best_size = size;
+            let label = if chunk >= 1024 { format!("{}k", chunk / 1024) } else { format!("{}", chunk) };
+            recommendation = format!("pltz -C {}", label);
+        }
+    }
+
+    eprintln!("  Recommended: {} {}", recommendation, path);
+    eprintln!("  Expected:    {} → {} bytes ({:.1}:1)", data.len(), best_size,
+        data.len() as f64 / best_size as f64);
+
+    Ok(())
 }
 
 fn print_geometry_info(compressed: &[u8]) {
