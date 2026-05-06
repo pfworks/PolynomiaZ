@@ -226,7 +226,7 @@ The primary implementation is written in Rust with a bzip2-style command-line in
 pltz file.bin           # compress -> file.bin.pltz
 pltz -d file.bin.pltz   # decompress -> file.bin
 pltz -k file.bin        # keep original
-pltz -z file.bin        # enable deflate fallback for raw tracks
+pltz --no-zlib file.bin # skip deflate on raw tracks (no zlib dep)
 pltz -c file.bin        # output to stdout (pipeable)
 pltz -t file.bin.pltz   # test integrity
 pltz -r 21 file.bin     # columnar pre-processing (stride=21)
