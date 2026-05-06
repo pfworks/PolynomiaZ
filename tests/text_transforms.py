@@ -4,7 +4,7 @@ Text transforms: reorder/transform text data to expose patterns for PLTZ compres
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
 from codec import encode, decode, set_raw_compressor
 
