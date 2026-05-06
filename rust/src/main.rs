@@ -16,31 +16,31 @@ struct Cli {
     #[arg(short, long)]
     decompress: bool,
 
-    /// Write to stdout (don't create files)
+    /// Write to stdout
     #[arg(short = 'c', long = "stdout")]
     to_stdout: bool,
 
-    /// Keep input files (don't delete)
+    /// Keep input files
     #[arg(short, long)]
     keep: bool,
 
-    /// Force overwrite of output files
+    /// Force overwrite
     #[arg(short, long)]
     force: bool,
 
-    /// Use zlib for raw (unpatternized) tracks
-    #[arg(short = 'z', long)]
-    zlib: bool,
+    /// Skip deflate on raw tracks (no zlib dep; decompress auto-detects)
+    #[arg(long = "no-zlib")]
+    no_zlib: bool,
 
-    /// Columnar pre-processing with given record stride (bytes)
+    /// Columnar pre-processing stride (e.g. 21, 1k)
     #[arg(short = 'r', long = "record-size")]
     record_size: Option<String>,
 
-    /// Chunked/streaming mode. Accepts: "auto", or size like 64k, 1M, 65536
+    /// Chunk size for streaming mode (e.g. 64k, 1M, auto)
     #[arg(short = 'C', long = "chunk-size")]
     chunk_size: Option<String>,
 
-    /// Test integrity (decompress and discard)
+    /// Test integrity
     #[arg(short, long)]
     test: bool,
 
@@ -140,7 +140,7 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
         }
     } else {
         // Compress
-        let raw_comp = if cli.zlib { RawCompressor::Zlib } else { RawCompressor::None };
+        let raw_comp = if cli.no_zlib { RawCompressor::None } else { RawCompressor::Zlib };
         let compressed = if let Some(ref cs) = cli.chunk_size {
             let chunk_size = if cs == "auto" {
                 auto_chunk_size(input_data.len())
