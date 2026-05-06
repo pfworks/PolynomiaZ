@@ -67,17 +67,18 @@ where $i$ is the byte's sequential position in the input.
   \foreach \s/\angle in {0/67.5, 1/22.5, 2/337.5, 3/292.5, 4/247.5, 5/202.5, 6/157.5, 7/112.5} {
     \node[font=\footnotesize] at (\angle:3.6) {S\s};
   }
-  % Highlight one sector (single sector on Track 0, between sector lines)
-  \fill[blue!20] (22.5:2.7) arc (22.5:67.5:2.7) -- (67.5:3.3) arc (67.5:22.5:3.3) -- cycle;
-  \draw[blue!60, thick] (22.5:2.7) arc (22.5:67.5:2.7) -- (67.5:3.3) arc (67.5:22.5:3.3) -- cycle;
-  \node[font=\footnotesize, blue] at (45:4.0) {byte $i$};
+  % Highlight one sector (S1 on Track 0, centered at 22.5 degrees)
+  \fill[blue!20] (0:2.7) arc (0:45:2.7) -- (45:3.3) arc (45:0:3.3) -- cycle;
+  \draw[blue!60, thick] (0:2.7) arc (0:45:2.7) -- (45:3.3) arc (45:0:3.3) -- cycle;
+  \node[font=\footnotesize, blue] at (22.5:4.0) {byte $i$};
   % Center
   \fill (0,0) circle (0.05);
-  % r and theta arrows from center, connected
-  \draw[->, thick] (0,0) -- (45:3.0);
-  \node[font=\footnotesize, anchor=south west] at (45:1.5) {$r$};
-  \draw[->, thick] (0.8,0) arc (0:45:0.8);
-  \node[font=\footnotesize] at (22:1.1) {$\theta$};
+  % r arrow from center to middle of highlighted sector
+  \draw[->, thick] (0,0) -- (22.5:3.0);
+  \node[font=\footnotesize, anchor=south west] at (22.5:1.5) {$r$};
+  % theta arc from horizontal to the sector center
+  \draw[->, thick] (0.9,0) arc (0:22.5:0.9);
+  \node[font=\footnotesize] at (11:1.2) {$\theta$};
 \end{tikzpicture}
 \caption{Disk platter model: input bytes are arranged in concentric tracks divided into sectors. Each byte at position $i$ maps to polar coordinates $(r, \theta)$.}
 \end{figure}
