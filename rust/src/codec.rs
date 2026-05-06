@@ -1,6 +1,7 @@
 /// Binary codec: encode (compress) and decode (decompress).
 
 use crate::analyzer::*;
+use crate::cross_track::*;
 use crate::platter::*;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
@@ -36,10 +37,15 @@ pub fn encode(data: &[u8], raw_compressor: RawCompressor) -> Vec<u8> {
     buf.extend_from_slice(&(geom.sectors_per_track as u16).to_le_bytes());
     buf.extend_from_slice(&(platters.len() as u16).to_le_bytes());
 
-    for platter in &platters {
-        buf.extend_from_slice(&(platter.len() as u16).to_le_bytes());
-        for enc in platter {
+    for (individual, meta_groups) in &platters {
+        // Track count = individual tracks + meta groups (each meta group counts as 1 entry)
+        let entry_count = individual.len() + meta_groups.len();
+        buf.extend_from_slice(&(entry_count as u16).to_le_bytes());
+        for enc in individual {
             encode_track(&mut buf, enc, geom.sectors_per_track, raw_compressor);
+        }
+        for group in meta_groups {
+            encode_meta_group(&mut buf, group);
         }
     }
 
@@ -71,13 +77,29 @@ pub fn decode(compressed: &[u8]) -> Result<Vec<u8>, String> {
         if offset + 2 > compressed.len() {
             return Err("Truncated platter header".into());
         }
-        let num_tracks = u16::from_le_bytes(compressed[offset..offset + 2].try_into().unwrap()) as usize;
+        let num_entries = u16::from_le_bytes(compressed[offset..offset + 2].try_into().unwrap()) as usize;
         offset += 2;
-        for _ in 0..num_tracks {
-            let (track_idx, track_data, new_offset) = decode_track(compressed, offset, sectors)?;
-            offset = new_offset;
-            if (track_idx as usize) < all_tracks.len() {
-                all_tracks[track_idx as usize] = Some(track_data);
+        for _ in 0..num_entries {
+            if offset + 3 > compressed.len() {
+                return Err("Truncated entry".into());
+            }
+            let tag_byte = compressed[offset + 2];
+            if tag_byte == META_TAG {
+                // Meta-group: skip the 3-byte header (sentinel idx + META_TAG)
+                offset += 3;
+                let (decoded_tracks, new_offset) = decode_meta_group(compressed, offset, sectors)?;
+                offset = new_offset;
+                for (idx, data) in decoded_tracks {
+                    if (idx as usize) < all_tracks.len() {
+                        all_tracks[idx as usize] = Some(data);
+                    }
+                }
+            } else {
+                let (track_idx, track_data, new_offset) = decode_track(compressed, offset, sectors)?;
+                offset = new_offset;
+                if (track_idx as usize) < all_tracks.len() {
+                    all_tracks[track_idx as usize] = Some(track_data);
+                }
             }
         }
     }
@@ -101,7 +123,10 @@ fn best_geometry(data: &[u8]) -> DiskGeometry {
         let geom = compute_geometry(data.len(), spt);
         let tracks = lay_out(data, &geom);
         let encodings = analyze_platter(&tracks);
-        let size: usize = encodings.iter().map(|e| estimate_track_size(e, spt)).sum();
+        let (meta_groups, remaining) = cross_track_optimize(encodings);
+        let individual_size: usize = remaining.iter().map(|e| estimate_track_size(e, spt)).sum();
+        let meta_size: usize = meta_groups.iter().map(|g| estimate_meta_size(g) + 3).sum(); // +3 for sentinel header
+        let size = individual_size + meta_size;
         if size < best_size {
             best_size = size;
             best_geom = geom;
@@ -110,12 +135,14 @@ fn best_geometry(data: &[u8]) -> DiskGeometry {
     best_geom
 }
 
-fn split_platters(tracks: &[Vec<u8>]) -> Vec<Vec<TrackEncoding>> {
+fn split_platters(tracks: &[Vec<u8>]) -> Vec<(Vec<TrackEncoding>, Vec<MetaGroup>)> {
     let encodings = analyze_platter(tracks);
+    let (meta_groups, remaining) = cross_track_optimize(encodings);
+
     let mut structured = Vec::new();
     let mut raw = Vec::new();
 
-    for enc in encodings {
+    for enc in remaining {
         if enc.pattern == PatternType::Raw {
             raw.push(enc);
         } else {
@@ -124,9 +151,15 @@ fn split_platters(tracks: &[Vec<u8>]) -> Vec<Vec<TrackEncoding>> {
     }
 
     let mut platters = Vec::new();
-    if !structured.is_empty() { platters.push(structured); }
-    if !raw.is_empty() { platters.push(raw); }
-    if platters.is_empty() { platters.push(Vec::new()); }
+    if !structured.is_empty() || !meta_groups.is_empty() {
+        platters.push((structured, meta_groups));
+    }
+    if !raw.is_empty() {
+        platters.push((raw, Vec::new()));
+    }
+    if platters.is_empty() {
+        platters.push((Vec::new(), Vec::new()));
+    }
     platters
 }
 
@@ -509,5 +542,29 @@ mod tests {
         let data: Vec<u8> = (0..200).map(|i| ((i * 2) % 256) as u8).collect();
         let full: Vec<u8> = data.iter().copied().cycle().take(1000).collect();
         roundtrip(&full);
+    }
+
+    #[test]
+    fn test_cross_track_const() {
+        // 64KB of 0xFF — should trigger cross-track meta for many CONST tracks
+        let data = vec![0xFFu8; 65536];
+        let compressed = encode(&data, RawCompressor::None);
+        let decompressed = decode(&compressed).unwrap();
+        assert_eq!(data, decompressed);
+        // With cross-track, this should be much smaller than individual CONST tracks
+        // Without cross-track: ~4 bytes per track * (65536/sector_size) tracks
+        // With cross-track: single meta-group
+        println!("64KB const: {} -> {} bytes", data.len(), compressed.len());
+        assert!(compressed.len() < 300, "Cross-track should compress 64KB const to <300B, got {}", compressed.len());
+    }
+
+    #[test]
+    fn test_cross_track_linear() {
+        // Many identical linear ramps (e.g., 0-255 repeated 64 times = 16KB)
+        let data: Vec<u8> = (0..=255u8).cycle().take(16384).collect();
+        let compressed = encode(&data, RawCompressor::None);
+        let decompressed = decode(&compressed).unwrap();
+        assert_eq!(data, decompressed);
+        println!("16KB linear ramps: {} -> {} bytes", data.len(), compressed.len());
     }
 }
