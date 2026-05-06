@@ -11,7 +11,7 @@ PolynomiaZ maps input data onto a virtual disk platter geometry (concentric trac
 ### How It Works
 
 1. **Layout** — Input bytes are arranged into tracks × sectors (configurable geometry)
-2. **Analysis** — Each track is tested against 11 pattern types
+2. **Analysis** — Each track is tested against 18 pattern types
 3. **Cross-track** — Groups of tracks with related parameters are merged into meta-descriptors
 4. **Encoding** — Matched patterns become compact function descriptors; unmatched tracks stored raw
 5. **Adaptive geometry** — 7 sector sizes are tried; the best-compressing geometry wins
@@ -31,6 +31,13 @@ PolynomiaZ maps input data onto a virtual disk platter geometry (concentric trac
 | LINEAR_WIDE | Linear sequence in 16/32-bit words | 19 bytes |
 | LINEAR_F64 | Linear sequence in IEEE 754 doubles | 18 bytes |
 | DELTA_F64 | f64 values with f32-representable deltas | 10 + 4(n-1) bytes |
+| XOR_MASK | Data XORed with constant reveals simpler pattern | 2 + inner bytes |
+| SPARSE | Mostly one value with few exceptions | 3 + 3×exceptions |
+| PIECEWISE_LINEAR | 2-4 linear segments with different slopes | 1 + 6×segments |
+| MIRROR | Second half is reverse of first half | n/2 bytes |
+| INTERLEAVED_LINEAR | Two interleaved arithmetic sequences | 10 bytes |
+| EXPONENTIAL | Geometric sequence a×r^i | 10 bytes |
+| DELTA_RLE | Run-length encoded deltas (staircases) | 3 + 2×runs |
 | RAW | No pattern (optional deflate fallback) | n bytes |
 
 ### Cross-Track Meta-Descriptors
@@ -166,7 +173,7 @@ Per platter:
 
 ## Roadmap
 
-- [x] Rust implementation with 11 pattern types
+- [x] Rust implementation with 18 pattern types
 - [x] Binary format (12-byte header + compact track encoding)
 - [x] Adaptive sector sizing (7 geometries)
 - [x] Multi-platter splitting (structured vs raw)

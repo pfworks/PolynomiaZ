@@ -48,7 +48,14 @@ Patterns are tried in order of compactness (RLE vs REPEAT picks smaller):
 7. DELTA (2 + n-1 bytes) — small deltas with ≤8 unique values
 8. PERIODIC (4 + 18/component) — FFT with few significant components
 9. POLY (1 + 8/coeff) — polynomial fit degree ≤ 8
-10. RAW (n bytes) — fallback, optionally deflate-compressed
+10. XOR_MASK (2 + inner) — data XORed with constant reveals simpler pattern
+11. SPARSE (3 + 3×exceptions) — mostly one value with few exceptions
+12. PIECEWISE_LINEAR (1 + 6×segments) — 2-4 linear segments
+13. MIRROR (n/2) — second half is reverse of first
+14. INTERLEAVED_LINEAR (10 bytes) — two interleaved arithmetic sequences
+15. EXPONENTIAL (10 bytes) — geometric sequence a×r^i
+16. DELTA_RLE (3 + 2×runs) — run-length encoded deltas
+17. RAW (n bytes) — fallback, optionally deflate-compressed
 
 ### Cross-Track Optimization
 
@@ -139,7 +146,7 @@ rust/src/
 ├── lib.rs           — Module declarations
 ├── main.rs          — CLI binary (bzip2-style interface)
 ├── platter.rs       — Disk geometry, data layout
-├── analyzer.rs      — Pattern detection (11 types, including DFT periodic + polyfit)
+├── analyzer.rs      — Pattern detection (18 types, including DFT periodic + polyfit)
 ├── codec.rs         — Binary encode/decode, adaptive geometry, multi-platter
 ├── columnar.rs      — Columnar pre-processing transform
 ├── cross_track.rs   — Cross-track meta-descriptor optimization
@@ -183,7 +190,7 @@ Per platter:
 
 - [x] Python prototype (reference implementation, now in tests/lib/)
 - [x] Rust implementation with bzip2-style CLI
-- [x] 11 pattern types including wide-word and f64 analysis
+- [x] 18 pattern types including wide-word and f64 analysis
 - [x] Cross-track meta-descriptors
 - [x] Adaptive sector sizing (7 geometries)
 - [x] Multi-platter splitting

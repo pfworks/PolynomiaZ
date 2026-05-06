@@ -159,11 +159,18 @@ Each track is tested against pattern detectors in priority order. When both RLE 
 9 & LINEAR\_WIDE & Linear sequence in 16/32-bit words & 19 bytes \\
 10 & LINEAR\_F64 & Linear sequence in IEEE 754 doubles & 18 bytes \\
 11 & DELTA\_F64 & f64 values with f32-representable deltas & $10 + 4(n-1)$ bytes \\
+13 & XOR\_MASK & Data XORed with constant reveals simpler pattern & $2 +$ inner bytes \\
+14 & SPARSE & Mostly one value with few exceptions & $3 + 3e$ bytes \\
+15 & PIECEWISE\_LINEAR & 2--4 linear segments & $1 + 6s$ bytes \\
+16 & MIRROR & Second half is reverse of first & $S/2$ bytes \\
+17 & INTERLEAVED\_LINEAR & Two interleaved arithmetic sequences & 10 bytes \\
+18 & EXPONENTIAL & Geometric sequence $a \cdot r^i$ & 10 bytes \\
+19 & DELTA\_RLE & Run-length encoded deltas (staircases) & $3 + 2r$ bytes \\
 7 & RAW & No pattern (fallback) & $S$ bytes \\
 8 & RAW\_COMPRESSED & RAW with deflate applied & $3 + n_c$ bytes \\
 \bottomrule
 \end{tabular}
-\caption{Pattern types and their storage costs. $S$ = sectors per track, $d$ = polynomial degree, $k$ = FFT components, $n_c$ = compressed size.}
+\caption{Pattern types and their storage costs. $S$ = sectors per track, $d$ = polynomial degree, $k$ = FFT components, $e$ = exceptions, $s$ = segments, $r$ = runs, $n_c$ = compressed size.}
 \end{table}
 
 \subsection{Wide-Word Analysis}
@@ -301,7 +308,7 @@ pltz -C 64k file.bin    # chunked mode (per-section geometry)
 pltz -C auto file.bin   # auto-detect chunk size
 \end{lstlisting}
 
-The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 11 pattern types (including periodic DFT and polynomial fitting) are implemented in pure Rust. The implementation includes 23 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption.
+The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 18 pattern types are implemented in pure Rust. The implementation includes 37 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption.
 
 \section{Comparison with Existing Work}
 
