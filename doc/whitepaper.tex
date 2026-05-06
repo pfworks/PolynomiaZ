@@ -54,11 +54,11 @@ where $i$ is the byte's sequential position in the input.
   \foreach \r in {1.2, 1.8, 2.4, 3.0} {
     \draw[gray!60] (0,0) circle (\r);
   }
-  % Track labels (right side, staggered vertically to avoid overlap)
-  \node[font=\footnotesize, anchor=west] at (3.1, 0.3) {Track 0};
-  \node[font=\footnotesize, anchor=west] at (2.5, -0.3) {Track 1};
-  \node[font=\footnotesize, anchor=west] at (1.9, 0.3) {Track 2};
-  \node[font=\footnotesize, anchor=west] at (1.3, -0.3) {Track 3};
+  % Track labels with arrows pointing to their ring
+  \draw[<-, gray!80] (3.0, 0.6) -- (3.8, 0.6) node[right, font=\footnotesize, black] {Track 0};
+  \draw[<-, gray!80] (2.4, 0.6) -- (3.8, 1.2) node[right, font=\footnotesize, black] {Track 1};
+  \draw[<-, gray!80] (1.8, 0.6) -- (3.8, 1.8) node[right, font=\footnotesize, black] {Track 2};
+  \draw[<-, gray!80] (1.2, 0.6) -- (3.8, 2.4) node[right, font=\footnotesize, black] {Track 3};
   % Draw sector lines
   \foreach \angle in {0,45,...,315} {
     \draw[gray!30] (0,0) -- (\angle:3.2);
