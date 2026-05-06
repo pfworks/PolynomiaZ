@@ -333,7 +333,6 @@ fn detect_periodic(track: &[u8]) -> Option<TrackParams> {
     let n = track.len();
     if n < 16 || n > 128 {
         return None; // DFT is O(n²); skip large tracks
-        return None;
     }
 
     let (real, imag) = rfft(track);

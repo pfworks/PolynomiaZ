@@ -1,0 +1,8 @@
+[package]
+name = "pltzfs"
+version = "0.1.0"
+edition = "2021"
+description = "PLTZ-based compressed filesystem — stores metadata and data on separate platters with mathematical pattern detection"
+
+[dependencies]
+pltz = { path = "../rust" }
