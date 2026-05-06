@@ -1,5 +1,5 @@
 use clap::Parser;
-use pltz::codec::{decode, encode, RawCompressor};
+use pltz::codec::{decode, encode, encode_auto, RawCompressor};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::process;
@@ -31,6 +31,10 @@ struct Cli {
     /// Use zlib for raw (unpatternized) tracks
     #[arg(short = 'z', long)]
     zlib: bool,
+
+    /// Columnar pre-processing with given record stride (bytes)
+    #[arg(short = 'r', long = "record-size")]
+    record_size: Option<usize>,
 
     /// Test integrity (decompress and discard)
     #[arg(short, long)]
@@ -101,7 +105,11 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
     } else {
         // Compress
         let raw_comp = if cli.zlib { RawCompressor::Zlib } else { RawCompressor::None };
-        let compressed = encode(&input_data, raw_comp);
+        let compressed = if let Some(stride) = cli.record_size {
+            encode_auto(&input_data, raw_comp, &[stride])
+        } else {
+            encode(&input_data, raw_comp)
+        };
 
         if cli.to_stdout || path == "-" {
             io::stdout().write_all(&compressed).map_err(|e| e.to_string())?;

@@ -1,6 +1,7 @@
 /// Binary codec: encode (compress) and decode (decompress).
 
 use crate::analyzer::*;
+use crate::columnar::*;
 use crate::cross_track::*;
 use crate::platter::*;
 use flate2::read::DeflateDecoder;
@@ -9,11 +10,39 @@ use flate2::Compression;
 use std::io::{Read, Write};
 
 const MAGIC: &[u8; 4] = b"PLTZ";
+const MAGIC_COLUMNAR: &[u8; 4] = b"PLTC"; // Columnar-transformed variant
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawCompressor {
     None,
     Zlib,
+}
+
+/// Encode with optional columnar pre-processing.
+/// Tries the given stride values and picks the best (including no transform).
+pub fn encode_auto(data: &[u8], raw_compressor: RawCompressor, strides: &[usize]) -> Vec<u8> {
+    let plain = encode(data, raw_compressor);
+    let mut best = plain;
+
+    for &stride in strides {
+        if stride == 0 || stride >= data.len() {
+            continue;
+        }
+        let transformed = columnar_transform(data, stride);
+        let inner = encode(&transformed, raw_compressor);
+        // Columnar wrapper: PLTC + original_len(4) + stride(2) + inner
+        let total_size = 4 + 4 + 2 + inner.len();
+        if total_size < best.len() {
+            let mut buf = Vec::with_capacity(total_size);
+            buf.extend_from_slice(MAGIC_COLUMNAR);
+            buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            buf.extend_from_slice(&(stride as u16).to_le_bytes());
+            buf.extend_from_slice(&inner);
+            best = buf;
+        }
+    }
+
+    best
 }
 
 /// Encode (compress) data into PLTZ binary format.
@@ -52,11 +81,21 @@ pub fn encode(data: &[u8], raw_compressor: RawCompressor) -> Vec<u8> {
     buf
 }
 
-/// Decode (decompress) PLTZ binary format back to original data.
+/// Decode (decompress) PLTZ or PLTC binary format back to original data.
 pub fn decode(compressed: &[u8]) -> Result<Vec<u8>, String> {
-    if compressed.len() < 12 {
+    if compressed.len() < 10 {
         return Err("Too short".into());
     }
+
+    // Check for columnar wrapper
+    if &compressed[0..4] == MAGIC_COLUMNAR {
+        let original_len = u32::from_le_bytes(compressed[4..8].try_into().unwrap()) as usize;
+        let stride = u16::from_le_bytes(compressed[8..10].try_into().unwrap()) as usize;
+        let inner = &compressed[10..];
+        let transformed = decode(inner)?;
+        return Ok(columnar_untransform(&transformed, stride, original_len));
+    }
+
     if &compressed[0..4] != MAGIC {
         return Err("Bad magic".into());
     }
