@@ -235,6 +235,9 @@ fn estimate_params_size(params: &TrackParams) -> usize {
         TrackParams::Sparse { entries, .. } => 3 + entries.len() * 3,
         TrackParams::PiecewiseLinear { segments } => 1 + segments.len() * 6,
         TrackParams::Mirror { half } => half.len(),
+        TrackParams::InterleavedLinear { .. } => 10,
+        TrackParams::Exponential { .. } => 10,
+        TrackParams::DeltaRle { runs, .. } => 3 + runs.len() * 2,
     }
 }
 

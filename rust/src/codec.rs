@@ -295,6 +295,9 @@ fn estimate_track_size(enc: &TrackEncoding, sectors: usize) -> usize {
         TrackParams::Sparse { entries, .. } => 3 + entries.len() * 3,
         TrackParams::PiecewiseLinear { segments } => 1 + segments.len() * 6,
         TrackParams::Mirror { half } => half.len(),
+        TrackParams::InterleavedLinear { .. } => 10,
+        TrackParams::Exponential { .. } => 10,
+        TrackParams::DeltaRle { runs, .. } => 3 + runs.len() * 2,
     }
 }
 
@@ -408,6 +411,32 @@ fn encode_track(buf: &mut Vec<u8>, enc: &TrackEncoding, _sectors: usize, raw_com
             buf.extend_from_slice(&enc.track_idx.to_le_bytes());
             buf.push(PatternType::Mirror as u8);
             buf.extend_from_slice(half);
+        }
+        TrackParams::InterleavedLinear { count, start_a, step_a, start_b, step_b } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::InterleavedLinear as u8);
+            buf.extend_from_slice(&count.to_le_bytes());
+            buf.extend_from_slice(&start_a.to_le_bytes());
+            buf.extend_from_slice(&step_a.to_le_bytes());
+            buf.extend_from_slice(&start_b.to_le_bytes());
+            buf.extend_from_slice(&step_b.to_le_bytes());
+        }
+        TrackParams::Exponential { count, base, ratio } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::Exponential as u8);
+            buf.extend_from_slice(&count.to_le_bytes());
+            buf.extend_from_slice(&base.to_le_bytes());
+            buf.extend_from_slice(&ratio.to_le_bytes());
+        }
+        TrackParams::DeltaRle { start, runs } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::DeltaRle as u8);
+            buf.push(*start);
+            buf.extend_from_slice(&(runs.len() as u16).to_le_bytes());
+            for &(delta, count) in runs {
+                buf.push(delta as u8);
+                buf.push(count);
+            }
         }
         TrackParams::Raw { data } => {
             if raw_comp == RawCompressor::Zlib {
@@ -628,6 +657,46 @@ fn decode_track(buf: &[u8], offset: usize, sectors: usize) -> Result<(u16, Vec<u
             let mut track = Vec::with_capacity(sectors);
             track.extend_from_slice(half);
             track.extend(half.iter().rev());
+            track
+        }
+        PatternType::InterleavedLinear => {
+            let count = u16::from_le_bytes(buf[pos..pos+2].try_into().unwrap()) as usize;
+            let start_a = i16::from_le_bytes(buf[pos+2..pos+4].try_into().unwrap());
+            let step_a = i16::from_le_bytes(buf[pos+4..pos+6].try_into().unwrap());
+            let start_b = i16::from_le_bytes(buf[pos+6..pos+8].try_into().unwrap());
+            let step_b = i16::from_le_bytes(buf[pos+8..pos+10].try_into().unwrap());
+            pos += 10;
+            let mut track = Vec::with_capacity(count * 2);
+            for i in 0..count {
+                track.push((start_a.wrapping_add((i as i16).wrapping_mul(step_a))) as u8);
+                track.push((start_b.wrapping_add((i as i16).wrapping_mul(step_b))) as u8);
+            }
+            track.truncate(sectors);
+            track
+        }
+        PatternType::Exponential => {
+            let count = u16::from_le_bytes(buf[pos..pos+2].try_into().unwrap()) as usize;
+            let base = f32::from_le_bytes(buf[pos+2..pos+6].try_into().unwrap());
+            let ratio = f32::from_le_bytes(buf[pos+6..pos+10].try_into().unwrap());
+            pos += 10;
+            (0..count).map(|i| (base * ratio.powi(i as i32)).round() as u8).collect()
+        }
+        PatternType::DeltaRle => {
+            let start = buf[pos]; pos += 1;
+            let num_runs = u16::from_le_bytes(buf[pos..pos+2].try_into().unwrap()) as usize;
+            pos += 2;
+            let mut track = Vec::with_capacity(sectors);
+            track.push(start);
+            for _ in 0..num_runs {
+                let delta = buf[pos] as i8;
+                let count = buf[pos+1] as usize;
+                pos += 2;
+                for _ in 0..count {
+                    let prev = *track.last().unwrap() as i16;
+                    track.push((prev + delta as i16) as u8);
+                }
+            }
+            track.truncate(sectors);
             track
         }
         PatternType::Raw => {
@@ -898,6 +967,36 @@ mod tests {
         roundtrip(&data);
         let compressed = encode(&data, RawCompressor::None);
         println!("Mirror 64B: {} -> {} bytes", data.len(), compressed.len());
+        assert!(compressed.len() < data.len());
+    }
+
+    #[test]
+    fn test_interleaved_linear() {
+        let data: Vec<u8> = (0..32).flat_map(|i| vec![i as u8, (100 + i) as u8]).collect();
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("Interleaved 64B: {} -> {} bytes", data.len(), compressed.len());
+        assert!(compressed.len() < data.len());
+    }
+
+    #[test]
+    fn test_exponential() {
+        let data: Vec<u8> = (0..16).map(|i| (2.0f32 * 1.2f32.powi(i)).round() as u8).collect();
+        roundtrip(&data);
+    }
+
+    #[test]
+    fn test_delta_rle() {
+        // Staircase: hold for 16, step up by 10, repeat
+        let mut data = Vec::new();
+        let mut val: u8 = 0;
+        for _ in 0..4 {
+            for _ in 0..16 { data.push(val); }
+            val = val.wrapping_add(10);
+        }
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("DeltaRle 64B: {} -> {} bytes", data.len(), compressed.len());
         assert!(compressed.len() < data.len());
     }
 }

@@ -172,6 +172,7 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
                 let ratio = compressed.len() as f64 / input_data.len() as f64;
                 eprintln!("  {}: {:.3}:1 ({} → {} bytes)",
                     path, 1.0 / ratio, input_data.len(), compressed.len());
+                print_geometry_info(&compressed);
             }
             if !cli.keep {
                 fs::remove_file(path).map_err(|e| e.to_string())?;
@@ -197,6 +198,38 @@ fn output_path_decompress(path: &str) -> Result<String, String> {
         Ok(stripped.to_string())
     } else {
         Err(format!("can't guess original name for {} (no .pltz suffix)", path))
+    }
+}
+
+fn print_geometry_info(compressed: &[u8]) {
+    if compressed.len() < 12 { return; }
+    let magic = &compressed[0..4];
+    match magic {
+        b"PLTZ" => {
+            let orig = u32::from_le_bytes(compressed[4..8].try_into().unwrap());
+            let spt = u16::from_le_bytes(compressed[8..10].try_into().unwrap());
+            let platters = u16::from_le_bytes(compressed[10..12].try_into().unwrap());
+            let tracks = if spt > 0 { (orig as usize + spt as usize - 1) / spt as usize } else { 0 };
+            eprintln!("    geometry: {} tracks × {} sectors, {} platters",
+                tracks, spt, platters);
+        }
+        b"PLTC" => {
+            let orig = u32::from_le_bytes(compressed[4..8].try_into().unwrap());
+            let stride = u16::from_le_bytes(compressed[8..10].try_into().unwrap());
+            eprintln!("    columnar: stride={}, inner:", stride);
+            if compressed.len() > 10 {
+                print_geometry_info(&compressed[10..]);
+            }
+            let _ = orig;
+        }
+        b"PLTS" => {
+            let orig = u32::from_le_bytes(compressed[5..9].try_into().unwrap());
+            let chunk_size = u32::from_le_bytes(compressed[9..13].try_into().unwrap());
+            let num_chunks = u16::from_le_bytes(compressed[13..15].try_into().unwrap());
+            eprintln!("    chunked: {}B original, {} chunks of {}B",
+                orig, num_chunks, chunk_size);
+        }
+        _ => {}
     }
 }
 

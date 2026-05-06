@@ -20,6 +20,9 @@ pub enum PatternType {
     Sparse = 14,
     PiecewiseLinear = 15,
     Mirror = 16,
+    InterleavedLinear = 17,
+    Exponential = 18,
+    DeltaRle = 19,
 }
 
 impl PatternType {
@@ -41,6 +44,9 @@ impl PatternType {
             14 => Some(Self::Sparse),
             15 => Some(Self::PiecewiseLinear),
             16 => Some(Self::Mirror),
+            17 => Some(Self::InterleavedLinear),
+            18 => Some(Self::Exponential),
+            19 => Some(Self::DeltaRle),
             _ => None,
         }
     }
@@ -67,6 +73,12 @@ pub enum TrackParams {
     PiecewiseLinear { segments: Vec<(u16, i16, i16)> },
     /// Mirror: first half stored, second half is reverse of first
     Mirror { half: Vec<u8> },
+    /// Interleaved linear: 2 interleaved linear sequences
+    InterleavedLinear { count: u16, start_a: i16, step_a: i16, start_b: i16, step_b: i16 },
+    /// Exponential/geometric: a * r^i (stored as f32 base + f32 ratio)
+    Exponential { count: u16, base: f32, ratio: f32 },
+    /// Delta-RLE: deltas between values are run-length encoded
+    DeltaRle { start: u8, runs: Vec<(i8, u8)> },
 }
 
 #[derive(Debug, Clone)]
@@ -630,6 +642,98 @@ fn detect_mirror(track: &[u8]) -> Option<TrackParams> {
     None
 }
 
+/// Interleaved linear: two interleaved arithmetic sequences.
+/// e.g., [a0, b0, a1, b1, a2, b2, ...] where a_i = start_a + i*step_a
+fn detect_interleaved_linear(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 || n % 2 != 0 { return None; }
+
+    let count = (n / 2) as u16;
+    let start_a = track[0] as i16;
+    let start_b = track[1] as i16;
+
+    if n < 4 { return None; }
+    let step_a = track[2] as i16 - start_a;
+    let step_b = track[3] as i16 - start_b;
+
+    for i in 0..count as usize {
+        let expected_a = (start_a + (i as i16) * step_a) as u8;
+        let expected_b = (start_b + (i as i16) * step_b) as u8;
+        if track[i * 2] != expected_a || track[i * 2 + 1] != expected_b {
+            return None;
+        }
+    }
+
+    // Cost: 2 (count) + 4*2 (start_a, step_a, start_b, step_b) = 10 bytes
+    if 10 < n {
+        Some(TrackParams::InterleavedLinear { count, start_a, step_a, start_b, step_b })
+    } else {
+        None
+    }
+}
+
+/// Exponential/geometric: values follow a * r^i, rounded to u8.
+fn detect_exponential(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    // Need first value > 0 and second value > 0 to compute ratio
+    if track[0] == 0 || track[1] == 0 { return None; }
+
+    let base = track[0] as f32;
+    let ratio = track[1] as f32 / base;
+
+    // Ratio must be meaningful (not 1.0 — that's CONST, not 0)
+    if ratio <= 0.0 || ratio == 1.0 { return None; }
+
+    // Verify all values match
+    for i in 0..n {
+        let expected = (base * ratio.powi(i as i32)).round() as i32;
+        if expected < 0 || expected > 255 || expected as u8 != track[i] {
+            return None;
+        }
+    }
+
+    // Cost: 2 (count) + 4 (base f32) + 4 (ratio f32) = 10 bytes
+    if 10 < n {
+        Some(TrackParams::Exponential { count: n as u16, base, ratio })
+    } else {
+        None
+    }
+}
+
+/// Delta-RLE: compute deltas, then run-length encode the deltas.
+fn detect_delta_rle(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    // Compute deltas
+    let mut runs: Vec<(i8, u8)> = Vec::new();
+    let mut i = 1;
+    while i < n {
+        let d = track[i] as i16 - track[i - 1] as i16;
+        if d < -128 || d > 127 { return None; }
+        let d8 = d as i8;
+        let mut count: u8 = 1;
+        while i + (count as usize) < n
+            && (track[i + count as usize] as i16 - track[i + count as usize - 1] as i16) == d as i16
+            && count < 255
+        {
+            count += 1;
+        }
+        runs.push((d8, count));
+        i += count as usize;
+    }
+
+    // Cost: 1 (start) + 2 (num_runs) + runs * 2 (delta i8 + count u8)
+    let cost = 3 + runs.len() * 2;
+    if cost < n && runs.len() * 2 < n - 1 {
+        Some(TrackParams::DeltaRle { start: track[0], runs })
+    } else {
+        None
+    }
+}
+
 pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_const(track) {
         return TrackEncoding { pattern: PatternType::Const, params, track_idx };
@@ -686,6 +790,15 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     }
     if let Some(params) = detect_piecewise_linear(track) {
         return TrackEncoding { pattern: PatternType::PiecewiseLinear, params, track_idx };
+    }
+    if let Some(params) = detect_interleaved_linear(track) {
+        return TrackEncoding { pattern: PatternType::InterleavedLinear, params, track_idx };
+    }
+    if let Some(params) = detect_exponential(track) {
+        return TrackEncoding { pattern: PatternType::Exponential, params, track_idx };
+    }
+    if let Some(params) = detect_delta_rle(track) {
+        return TrackEncoding { pattern: PatternType::DeltaRle, params, track_idx };
     }
     if let Some(params) = detect_xor_mask(track) {
         return TrackEncoding { pattern: PatternType::XorMask, params, track_idx };
