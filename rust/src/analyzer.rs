@@ -1,4 +1,5 @@
 /// Pattern detection for track data.
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -13,6 +14,8 @@ pub enum PatternType {
     Raw = 7,
     RawCompressed = 8,
     LinearWide = 9,
+    LinearF64 = 10,
+    DeltaF64 = 11,
 }
 
 impl PatternType {
@@ -28,6 +31,8 @@ impl PatternType {
             7 => Some(Self::Raw),
             8 => Some(Self::RawCompressed),
             9 => Some(Self::LinearWide),
+            10 => Some(Self::LinearF64),
+            11 => Some(Self::DeltaF64),
             _ => None,
         }
     }
@@ -44,6 +49,8 @@ pub enum TrackParams {
     Poly { degree: u8, coeffs: Vec<f64> },
     Raw { data: Vec<u8> },
     LinearWide { width: u8, count: u16, start: i64, step: i64 },
+    LinearF64 { count: u16, start: f64, step: f64 },
+    DeltaF64 { count: u16, start: f64, deltas_f32: Vec<f32> },
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +60,7 @@ pub struct TrackEncoding {
     pub track_idx: u16,
 }
 
-pub fn detect_const(track: &[u8]) -> Option<TrackParams> {
+fn detect_const(track: &[u8]) -> Option<TrackParams> {
     let first = track[0];
     if track.iter().all(|&b| b == first) {
         Some(TrackParams::Const { value: first })
@@ -62,7 +69,7 @@ pub fn detect_const(track: &[u8]) -> Option<TrackParams> {
     }
 }
 
-pub fn detect_linear(track: &[u8]) -> Option<TrackParams> {
+fn detect_linear(track: &[u8]) -> Option<TrackParams> {
     if track.len() < 2 {
         return None;
     }
@@ -76,13 +83,13 @@ pub fn detect_linear(track: &[u8]) -> Option<TrackParams> {
     Some(TrackParams::Linear { start, step })
 }
 
-pub fn detect_rle(track: &[u8]) -> Option<TrackParams> {
+fn detect_rle(track: &[u8]) -> Option<TrackParams> {
     let mut runs: Vec<(u8, u8)> = Vec::new();
     let mut i = 0;
     while i < track.len() {
         let val = track[i];
         let mut count: u8 = 1;
-        while i + count as usize < track.len()
+        while i + (count as usize) < track.len()
             && track[i + count as usize] == val
             && count < 255
         {
@@ -98,7 +105,7 @@ pub fn detect_rle(track: &[u8]) -> Option<TrackParams> {
     }
 }
 
-pub fn detect_repeat(track: &[u8]) -> Option<TrackParams> {
+fn detect_repeat(track: &[u8]) -> Option<TrackParams> {
     let n = track.len();
     for period in 1..=(n / 2) {
         let pattern = &track[..period];
@@ -111,16 +118,17 @@ pub fn detect_repeat(track: &[u8]) -> Option<TrackParams> {
     None
 }
 
-pub fn detect_delta(track: &[u8]) -> Option<TrackParams> {
+fn detect_delta(track: &[u8]) -> Option<TrackParams> {
     let mut deltas: Vec<i8> = Vec::with_capacity(track.len() - 1);
-    let mut unique = std::collections::HashSet::new();
+    let mut unique: HashSet<i8> = HashSet::new();
     for i in 1..track.len() {
         let d = track[i] as i16 - track[i - 1] as i16;
         if d < -128 || d > 127 {
             return None;
         }
-        deltas.push(d as i8);
-        unique.insert(d as i8);
+        let d8 = d as i8;
+        deltas.push(d8);
+        unique.insert(d8);
     }
     if unique.len() <= 8 {
         Some(TrackParams::Delta {
@@ -132,22 +140,16 @@ pub fn detect_delta(track: &[u8]) -> Option<TrackParams> {
     }
 }
 
-/// Detect linear patterns in 16-bit or 32-bit word interpretations of the track.
-pub fn detect_linear_wide(track: &[u8]) -> Option<TrackParams> {
+fn detect_linear_wide(track: &[u8]) -> Option<TrackParams> {
     let n = track.len();
 
     // Try 32-bit LE
     if n >= 8 && n % 4 == 0 {
         let count = n / 4;
         let words: Vec<i64> = (0..count)
-            .map(|i| {
-                u32::from_le_bytes([
-                    track[i * 4],
-                    track[i * 4 + 1],
-                    track[i * 4 + 2],
-                    track[i * 4 + 3],
-                ]) as i64
-            })
+            .map(|i| u32::from_le_bytes([
+                track[i * 4], track[i * 4 + 1], track[i * 4 + 2], track[i * 4 + 3],
+            ]) as i64)
             .collect();
         if let Some((start, step)) = check_linear_i64(&words) {
             return Some(TrackParams::LinearWide {
@@ -192,6 +194,103 @@ fn check_linear_i64(words: &[i64]) -> Option<(i64, i64)> {
     Some((start, step))
 }
 
+fn detect_linear_f64(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 16 || n % 8 != 0 {
+        return None;
+    }
+    let count = n / 8;
+    let doubles: Vec<f64> = (0..count)
+        .map(|i| f64::from_le_bytes(track[i * 8..(i + 1) * 8].try_into().unwrap()))
+        .collect();
+
+    // Check for NaN/Inf
+    if doubles.iter().any(|&d| d.is_nan() || d.is_infinite()) {
+        return None;
+    }
+
+    if count < 2 {
+        return None;
+    }
+
+    let start = doubles[0];
+    let step = doubles[1] - start;
+
+    for i in 2..count {
+        let expected_step = doubles[i] - doubles[i - 1];
+        if (expected_step - step).abs() > step.abs() * 1e-12 + 1e-15 {
+            return None;
+        }
+    }
+
+    // Verify byte-exact reconstruction
+    for i in 0..count {
+        let reconstructed = start + (i as f64) * step;
+        let orig_bytes = &track[i * 8..(i + 1) * 8];
+        let recon_bytes = reconstructed.to_le_bytes();
+        if orig_bytes != recon_bytes {
+            return None;
+        }
+    }
+
+    if 18 < n {
+        Some(TrackParams::LinearF64 { count: count as u16, start, step })
+    } else {
+        None
+    }
+}
+
+fn detect_delta_f64(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 16 || n % 8 != 0 {
+        return None;
+    }
+    let count = n / 8;
+    let doubles: Vec<f64> = (0..count)
+        .map(|i| f64::from_le_bytes(track[i * 8..(i + 1) * 8].try_into().unwrap()))
+        .collect();
+
+    if doubles.iter().any(|&d| d.is_nan() || d.is_infinite()) {
+        return None;
+    }
+
+    let mut deltas_f32: Vec<f32> = Vec::with_capacity(count - 1);
+    for i in 1..count {
+        let d = doubles[i] - doubles[i - 1];
+        if d.abs() > 3.4e38 {
+            return None;
+        }
+        let f32_val = d as f32;
+        if ((f32_val as f64) - d).abs() > d.abs() * 1e-6 + 1e-30 {
+            return None;
+        }
+        deltas_f32.push(f32_val);
+    }
+
+    // Cost check
+    let cost = 10 + (count - 1) * 4; // 2 (count) + 8 (start) + deltas*4
+    if cost >= n {
+        return None;
+    }
+
+    // Verify byte-exact reconstruction
+    let mut current = doubles[0];
+    for i in 0..deltas_f32.len() {
+        current += deltas_f32[i] as f64;
+        let orig_bytes = &track[(i + 1) * 8..(i + 2) * 8];
+        let recon_bytes = current.to_le_bytes();
+        if orig_bytes != recon_bytes {
+            return None;
+        }
+    }
+
+    Some(TrackParams::DeltaF64 {
+        count: count as u16,
+        start: doubles[0],
+        deltas_f32,
+    })
+}
+
 pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_const(track) {
         return TrackEncoding { pattern: PatternType::Const, params, track_idx };
@@ -199,19 +298,42 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_linear(track) {
         return TrackEncoding { pattern: PatternType::Linear, params, track_idx };
     }
-    if let Some(params) = detect_rle(track) {
-        return TrackEncoding { pattern: PatternType::Rle, params, track_idx };
+
+    // Try both RLE and REPEAT, pick smaller
+    let rle = detect_rle(track);
+    let repeat = detect_repeat(track);
+    match (&rle, &repeat) {
+        (Some(TrackParams::Rle { runs }), Some(TrackParams::Repeat { pattern })) => {
+            let rle_cost = 2 + runs.len() * 2;
+            let repeat_cost = 2 + pattern.len();
+            if repeat_cost <= rle_cost {
+                return TrackEncoding { pattern: PatternType::Repeat, params: repeat.unwrap(), track_idx };
+            } else {
+                return TrackEncoding { pattern: PatternType::Rle, params: rle.unwrap(), track_idx };
+            }
+        }
+        (Some(_), None) => {
+            return TrackEncoding { pattern: PatternType::Rle, params: rle.unwrap(), track_idx };
+        }
+        (None, Some(_)) => {
+            return TrackEncoding { pattern: PatternType::Repeat, params: repeat.unwrap(), track_idx };
+        }
+        _ => {}
     }
-    if let Some(params) = detect_repeat(track) {
-        return TrackEncoding { pattern: PatternType::Repeat, params, track_idx };
-    }
+
     if let Some(params) = detect_linear_wide(track) {
         return TrackEncoding { pattern: PatternType::LinearWide, params, track_idx };
+    }
+    if let Some(params) = detect_linear_f64(track) {
+        return TrackEncoding { pattern: PatternType::LinearF64, params, track_idx };
+    }
+    if let Some(params) = detect_delta_f64(track) {
+        return TrackEncoding { pattern: PatternType::DeltaF64, params, track_idx };
     }
     if let Some(params) = detect_delta(track) {
         return TrackEncoding { pattern: PatternType::Delta, params, track_idx };
     }
-    // Skip periodic and poly for now (require FFT / polyfit — complex in pure Rust)
+
     TrackEncoding {
         pattern: PatternType::Raw,
         params: TrackParams::Raw { data: track.to_vec() },
