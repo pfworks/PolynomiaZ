@@ -187,6 +187,15 @@ Per platter:
 - [x] Streaming/chunked encoding (`pltz -C 64k` or `pltz -C auto`)
 - [x] File format versioning (PLTS v2 header)
 
+### Future Investigation: Alternative Geometries
+
+- [ ] Radial geometry (pie slices — columnar transform baked into geometry)
+- [ ] Zoned geometry (variable sectors per track, like modern HDDs)
+- [ ] Fractal/hierarchical (recursive subdivision, multi-scale pattern detection)
+- [ ] Spiral geometry (no track boundaries, patterns can span any length)
+- [ ] Cylindrical (cross-platter patterns at same radius)
+- [ ] Helical scan (diagonal traversal for 2D-structured data)
+
 ---
 
 ## Columnar Pre-Processing
