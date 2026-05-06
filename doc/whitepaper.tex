@@ -1,0 +1,238 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10}
+}
+
+\title{\textbf{PolynomiaZ: Polar Coordinate Compression via\\Mathematical Function Fitting on Virtual Disk Platters}}
+\author{PF Works}
+\date{May 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present PolynomiaZ (PLTZ), a lossless compression codec that maps input data onto a virtual disk platter geometry and detects mathematical patterns within each track. Tracks matching a known pattern type are stored as compact function descriptors rather than raw bytes. PLTZ achieves 5--12$\times$ better compression than zlib on linearly structured numerical data (firmware images, satellite telemetry, SPICE ephemeris kernels) while maintaining less than 1\% overhead on incompressible data. The codec supports adaptive sector sizing, multi-platter splitting, configurable raw fallback compression, and word-width-aware analysis for 16/32/64-bit numerical arrays.
+\end{abstract}
+
+\section{Introduction}
+
+Standard compression algorithms (zlib, bzip2, LZMA) operate by identifying byte-level repetition through sliding windows, Burrows-Wheeler transforms, or dictionary coding. These approaches excel at data with repeated substrings---natural language text, markup, log files---but fundamentally cannot recognize that a byte sequence like $[0, 1, 2, 3, \ldots, 255]$ represents a linear function. They see ``no repeated substrings'' and store it nearly verbatim.
+
+PolynomiaZ takes a different approach: it treats the input as data written to a virtual disk platter and asks, for each track, ``what mathematical function produced these bytes?'' When a function is found, the track is stored as a compact descriptor (e.g., \texttt{LINEAR(start=0, step=1)} in 4 bytes instead of 256 raw bytes).
+
+This approach is not general-purpose. It targets a specific domain: data with known mathematical structure arising from physical processes, calibration sequences, address tables, and numerical computation.
+
+\section{Architecture}
+
+\subsection{Disk Platter Model}
+
+Input data of length $N$ bytes is mapped onto a virtual disk with geometry $(T, S)$ where $T$ is the number of concentric tracks and $S$ is the number of sectors per track, such that $T \times S \geq N$. Each byte occupies a position $(r, \theta)$ in polar coordinates:
+\begin{align}
+r &= \lfloor i / S \rfloor \quad \text{(track index)} \\
+\theta &= \frac{2\pi (i \bmod S)}{S} \quad \text{(angular position)}
+\end{align}
+where $i$ is the byte's sequential position in the input.
+
+\subsection{Adaptive Geometry Selection}
+
+The codec evaluates multiple sector sizes $S \in \{8, 16, 32, 64, 128, 256, 512\}$ and selects the geometry that produces the smallest compressed output. Different data benefits from different geometries: small sectors expose patterns in structured headers, while large sectors capture long arithmetic sequences.
+
+\subsection{Multi-Platter Splitting}
+
+After analysis, tracks are separated into two platters:
+\begin{itemize}
+\item \textbf{Platter 0}: Tracks with detected patterns (structured data)
+\item \textbf{Platter 1}: Tracks with no pattern (raw data, optionally compressed with a fallback algorithm)
+\end{itemize}
+
+This separation allows the raw fallback compressor to operate on contiguous unstructured data without interference from the structured tracks.
+
+\section{Pattern Detection}
+
+Each track is tested against pattern detectors in priority order. The first match wins (or the smallest encoding is chosen when multiple patterns match).
+
+\subsection{Pattern Types}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Tag} & \textbf{Pattern} & \textbf{Detection Criterion} & \textbf{Storage Cost} \\
+\midrule
+0 & CONST & All bytes identical & 1 byte \\
+1 & LINEAR & $x_i = a + bi$ for all $i$ & 4 bytes \\
+2 & RLE & Run-length encoding saves space & $2n_{\text{runs}}$ bytes \\
+3 & REPEAT & Repeating sub-pattern of period $p < S/3$ & $p$ bytes \\
+4 & DELTA & $\leq 8$ unique deltas, all in $[-128, 127]$ & $S+1$ bytes \\
+5 & PERIODIC & FFT with $k$ significant components & $4 + 18k$ bytes \\
+6 & POLY & Polynomial degree $\leq 8$ exact fit & $1 + 8(d+1)$ bytes \\
+9 & LINEAR\_WIDE & Linear sequence in 16/32-bit words & 19 bytes \\
+10 & LINEAR\_F64 & Linear sequence in IEEE 754 doubles & 18 bytes \\
+11 & DELTA\_F64 & f64 values with f32-representable deltas & $10 + 4(n-1)$ bytes \\
+7 & RAW & No pattern (fallback) & $S$ bytes \\
+8 & RAW\_COMPRESSED & RAW with deflate applied & $3 + n_c$ bytes \\
+\bottomrule
+\end{tabular}
+\caption{Pattern types and their storage costs. $S$ = sectors per track, $d$ = polynomial degree, $k$ = FFT components, $n_c$ = compressed size.}
+\end{table}
+
+\subsection{Wide-Word Analysis}
+
+A key innovation is reinterpreting byte tracks as arrays of wider integer or floating-point types. A track of 128 bytes that appears random at the byte level may contain 32 linearly-incrementing 32-bit addresses:
+\[
+\texttt{[0x80000000, 0x80000020, 0x80000040, \ldots]}
+\]
+The LINEAR\_WIDE detector unpacks bytes as little-endian 16-bit or 32-bit unsigned integers and checks for arithmetic sequences. LINEAR\_F64 and DELTA\_F64 do the same for IEEE 754 double-precision values, with byte-exact reconstruction verification.
+
+\subsection{Lossless Guarantee}
+
+All pattern detectors verify byte-exact reconstruction before accepting a match. For floating-point patterns (LINEAR\_F64, DELTA\_F64), the reconstructed bytes are compared against the original---not just the numerical values---ensuring no precision loss from floating-point arithmetic.
+
+\section{Binary Format}
+
+\begin{lstlisting}
+Header (12 bytes):
+  [4] Magic "PLTZ"
+  [4] Original data length (uint32 LE)
+  [2] Sectors per track (uint16 LE)
+  [2] Number of platters (uint16 LE)
+
+Per platter:
+  [2] Number of tracks (uint16 LE)
+  Per track:
+    [2] Track index (uint16 LE)
+    [1] Pattern tag (uint8)
+    [...] Pattern-specific payload
+\end{lstlisting}
+
+The format has a fixed 12-byte header overhead. Each track costs 3 bytes for its index and tag, plus the pattern-specific payload. For a file with all tracks matching CONST, the overhead is $12 + 2 + T \times 4$ bytes regardless of input size.
+
+\section{Experimental Results}
+
+\subsection{Structured Data (PLTZ Advantage)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Data} & \textbf{Original} & \textbf{PLTZ} & \textbf{zlib} & \textbf{Improvement} \\
+\midrule
+Linear ramp (byte) & 4,096 B & 126 B & 315 B & 2.5$\times$ \\
+Linear ramp (f64 epochs) & 8,192 B & 350 B & 1,881 B & 5.4$\times$ \\
+Vector table (u32) & 1,024 B & 58 B & 88 B & 1.5$\times$ \\
+Segment addresses (u32) & 4,096 B & 182 B & 2,244 B & 12.3$\times$ \\
+Firmware (padding + headers) & 4,096 B & 90 B & 307 B & 3.4$\times$ \\
+Mixed structured + random & 4,096 B & 2,150 B & 2,381 B & 1.1$\times$ \\
+\bottomrule
+\end{tabular}
+\caption{PLTZ vs.\ zlib on mathematically structured data.}
+\end{table}
+
+\subsection{Unstructured Data (PLTZ Disadvantage)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lrrrl@{}}
+\toprule
+\textbf{Data} & \textbf{Original} & \textbf{PLTZ} & \textbf{zlib} & \textbf{Reason} \\
+\midrule
+English text & 1,580 B & 1,656 B & 680 B & Statistical, not mathematical \\
+Random data & 4,096 B & 4,134 B & 4,109 B & Incompressible; 1\% overhead \\
+Constant fill 64KB & 65,536 B & 526 B & 84 B & zlib RLE more byte-efficient \\
+\bottomrule
+\end{tabular}
+\caption{Cases where standard compressors outperform PLTZ.}
+\end{table}
+
+\subsection{Domain-Specific Benchmarks}
+
+\subsubsection{U-Boot Firmware}
+
+Per-section analysis of a synthetic 512KB U-Boot image shows PLTZ winning on structured sections (vector tables: 36B vs.\ 88B, relocation tables: 102B vs.\ 576B, PLL config: 36B vs.\ 201B) while losing on machine code and large constant fills.
+
+\subsubsection{SPICE Ephemeris Kernels}
+
+For JPL SPICE kernel structures, PLTZ achieves 5.4$\times$ better compression than zlib on linearly-spaced epoch arrays (the time index present in every SPK/CK file) and 12.3$\times$ on segment address directories. Chebyshev polynomial coefficients (the bulk of SPK data) remain better served by LZMA due to their high-entropy nature.
+
+\section{Target Applications}
+
+PLTZ is designed for domains where data originates from mathematical processes:
+
+\begin{enumerate}
+\item \textbf{Embedded firmware}: Flash images with 0xFF padding, address tables, calibration ramps
+\item \textbf{Satellite telemetry}: Housekeeping data, attitude quaternions, epoch arrays, CCSDS framing
+\item \textbf{Scientific instruments}: ADC/DAC sweeps, spectral calibration, sensor linearization tables
+\item \textbf{SPICE kernels}: Epoch directories, segment address tables, orientation polynomials
+\item \textbf{Protocol framing}: Sync patterns, incrementing sequence numbers, structured headers
+\item \textbf{Lookup tables}: Gamma curves, PWM tables, motor control profiles
+\end{enumerate}
+
+\section{Implementation}
+
+The reference implementation is written in Rust with a bzip2-style command-line interface:
+
+\begin{lstlisting}[language=bash]
+pltz file.bin           # compress -> file.bin.pltz
+pltz -d file.bin.pltz   # decompress -> file.bin
+pltz -k file.bin        # keep original
+pltz -z file.bin        # enable zlib fallback for raw tracks
+pltz -c file.bin        # output to stdout (pipeable)
+\end{lstlisting}
+
+The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. Compression speed is dominated by the adaptive geometry search (7 sector sizes $\times$ pattern detection per track).
+
+\section{Comparison with Existing Work}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Algorithm} & \textbf{Strategy} & \textbf{Best Domain} \\
+\midrule
+zlib (DEFLATE) & LZ77 + Huffman & Repeated substrings \\
+bzip2 & BWT + RLE + Huffman & Long-range repetition \\
+LZMA & Large dictionary + range coding & General purpose \\
+\textbf{PLTZ} & \textbf{Function fitting on polar geometry} & \textbf{Mathematical structure} \\
+\bottomrule
+\end{tabular}
+\caption{Algorithmic comparison.}
+\end{table}
+
+PLTZ occupies a unique niche: it recognizes \emph{semantic} structure (``this is a linear function'') rather than \emph{syntactic} structure (``these bytes appeared before''). The two approaches are complementary---PLTZ with a zlib fallback combines the strengths of both.
+
+\section{Limitations and Future Work}
+
+\textbf{Current limitations:}
+\begin{itemize}
+\item Single geometry for the entire file (mixed-structure files need pre-segmentation)
+\item No cross-track pattern detection (same function on multiple tracks stored redundantly)
+\item Periodic detection requires exact FFT reconstruction (integer rounding breaks it)
+\item Slower than zlib due to adaptive geometry search
+\end{itemize}
+
+\textbf{Planned improvements:}
+\begin{itemize}
+\item Columnar pre-processing transform for record-oriented data
+\item Cross-track correlation (detect identical patterns across tracks)
+\item Streaming/chunked mode for large files
+\item Per-section geometry (different sector sizes for different regions)
+\end{itemize}
+
+\section{Conclusion}
+
+PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter and fitting functions per track, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The approach is complementary to existing compressors and is most effective when used as part of a hybrid pipeline.
+
+\end{document}
