@@ -119,7 +119,9 @@ rust/src/
 ├── platter.rs       — Disk geometry, data layout
 ├── analyzer.rs      — Pattern detection (11 types)
 ├── codec.rs         — Binary encode/decode, adaptive geometry, multi-platter
-└── cross_track.rs   — Cross-track meta-descriptor optimization
+├── columnar.rs      — Columnar pre-processing transform
+├── cross_track.rs   — Cross-track meta-descriptor optimization
+└── encrypt.rs       — Structured encryption (⚠️ demo)
 
 tests/
 ├── test_codec.py    — Python round-trip tests

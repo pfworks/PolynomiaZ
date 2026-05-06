@@ -46,8 +46,8 @@ Patterns are tried in order of compactness (RLE vs REPEAT picks smaller):
 5. LINEAR_F64 (18 bytes) — linear in IEEE 754 doubles
 6. DELTA_F64 (10 + 4n bytes) — f64 with f32-representable deltas
 7. DELTA (2 + n-1 bytes) — small deltas with ≤8 unique values
-8. PERIODIC (4 + 18/component) — FFT with few significant components (Python only)
-9. POLY (1 + 8/coeff) — polynomial fit degree ≤ 8 (Python only)
+8. PERIODIC (4 + 18/component) — FFT with few significant components
+9. POLY (1 + 8/coeff) — polynomial fit degree ≤ 8
 10. RAW (n bytes) — fallback, optionally deflate-compressed
 
 ### Cross-Track Optimization
@@ -139,9 +139,11 @@ rust/src/
 ├── lib.rs           — Module declarations
 ├── main.rs          — CLI binary (bzip2-style interface)
 ├── platter.rs       — Disk geometry, data layout
-├── analyzer.rs      — Pattern detection (11 types)
+├── analyzer.rs      — Pattern detection (11 types, including DFT periodic + polyfit)
 ├── codec.rs         — Binary encode/decode, adaptive geometry, multi-platter
-└── cross_track.rs   — Cross-track meta-descriptor optimization
+├── columnar.rs      — Columnar pre-processing transform
+├── cross_track.rs   — Cross-track meta-descriptor optimization
+└── encrypt.rs       — Structured encryption (⚠️ demo)
 
 tests/
 ├── test_codec.py    — Python round-trip tests

@@ -231,7 +231,7 @@ pltz -c file.bin        # output to stdout (pipeable)
 pltz -t file.bin.pltz   # test integrity
 \end{lstlisting}
 
-The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. The implementation includes 15 unit tests covering all pattern types, cross-track optimization, and edge cases.
+The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 11 pattern types (including periodic DFT and polynomial fitting) are implemented in pure Rust. The implementation includes 23 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption.
 
 \section{Comparison with Existing Work}
 
@@ -337,7 +337,7 @@ PSE protects:
 \textbf{Current limitations:}
 \begin{itemize}
 \item Single geometry for the entire file (mixed-structure files need pre-segmentation)
-\item Periodic and polynomial detection not yet in Rust (Python reference only)
+\item Periodic detection uses O($n^2$) DFT; slow on tracks $>$ 128 bytes
 \item Slower than zlib due to adaptive geometry search (7 sector sizes $\times$ pattern detection)
 \item Cross-track requires $\geq$4 tracks with same pattern to activate
 \item Structured encryption uses demo cipher (not production-ready)
