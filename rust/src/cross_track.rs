@@ -231,6 +231,10 @@ fn estimate_params_size(params: &TrackParams) -> usize {
         TrackParams::LinearWide { .. } => 19,
         TrackParams::LinearF64 { .. } => 18,
         TrackParams::DeltaF64 { deltas_f32, .. } => 10 + deltas_f32.len() * 4,
+        TrackParams::XorMask { inner_params, .. } => 2 + inner_params.len(),
+        TrackParams::Sparse { entries, .. } => 3 + entries.len() * 3,
+        TrackParams::PiecewiseLinear { segments } => 1 + segments.len() * 6,
+        TrackParams::Mirror { half } => half.len(),
     }
 }
 

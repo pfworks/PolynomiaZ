@@ -16,6 +16,10 @@ pub enum PatternType {
     LinearWide = 9,
     LinearF64 = 10,
     DeltaF64 = 11,
+    XorMask = 13,
+    Sparse = 14,
+    PiecewiseLinear = 15,
+    Mirror = 16,
 }
 
 impl PatternType {
@@ -33,6 +37,10 @@ impl PatternType {
             9 => Some(Self::LinearWide),
             10 => Some(Self::LinearF64),
             11 => Some(Self::DeltaF64),
+            13 => Some(Self::XorMask),
+            14 => Some(Self::Sparse),
+            15 => Some(Self::PiecewiseLinear),
+            16 => Some(Self::Mirror),
             _ => None,
         }
     }
@@ -51,6 +59,14 @@ pub enum TrackParams {
     LinearWide { width: u8, count: u16, start: i64, step: i64 },
     LinearF64 { count: u16, start: f64, step: f64 },
     DeltaF64 { count: u16, start: f64, deltas_f32: Vec<f32> },
+    /// XOR mask: data XORed with `mask` yields an inner pattern (tag + params)
+    XorMask { mask: u8, inner_tag: u8, inner_params: Vec<u8> },
+    /// Sparse: mostly one fill value with a few exceptions at given indices
+    Sparse { fill: u8, entries: Vec<(u16, u8)> },
+    /// Piecewise linear: 2-4 segments each with start_idx, start_val, step
+    PiecewiseLinear { segments: Vec<(u16, i16, i16)> },
+    /// Mirror: first half stored, second half is reverse of first
+    Mirror { half: Vec<u8> },
 }
 
 #[derive(Debug, Clone)]
@@ -487,6 +503,133 @@ fn polyfit_exact(track: &[u8], degree: usize) -> Option<Vec<f64>> {
     Some(coeffs)
 }
 
+/// XOR mask: try XORing with common masks and see if the result is a simpler pattern.
+fn detect_xor_mask(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    for &mask in &[0xFF, 0xAA, 0x55, 0x0F, 0xF0] {
+        let unmasked: Vec<u8> = track.iter().map(|&b| b ^ mask).collect();
+
+        // Check if unmasked is CONST
+        if unmasked.iter().all(|&b| b == unmasked[0]) {
+            // Cost: 1 (mask) + 1 (inner_tag) + 1 (value) = 3 bytes
+            if 3 < n {
+                return Some(TrackParams::XorMask {
+                    mask,
+                    inner_tag: PatternType::Const as u8,
+                    inner_params: vec![unmasked[0]],
+                });
+            }
+        }
+
+        // Check if unmasked is LINEAR
+        if unmasked.len() >= 2 {
+            let start = unmasked[0] as i16;
+            let step = unmasked[1] as i16 - start;
+            let is_linear = unmasked.windows(2).all(|w| w[1] as i16 - w[0] as i16 == step);
+            if is_linear {
+                // Cost: 1 (mask) + 1 (inner_tag) + 4 (start+step) = 6 bytes
+                if 6 < n {
+                    let mut inner = Vec::new();
+                    inner.extend_from_slice(&start.to_le_bytes());
+                    inner.extend_from_slice(&step.to_le_bytes());
+                    return Some(TrackParams::XorMask {
+                        mask,
+                        inner_tag: PatternType::Linear as u8,
+                        inner_params: inner,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Sparse: mostly one fill value with few exceptions.
+fn detect_sparse(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    // Find most common value
+    let mut counts = [0u32; 256];
+    for &b in track { counts[b as usize] += 1; }
+    let fill = counts.iter().enumerate().max_by_key(|(_, &c)| c).unwrap().0 as u8;
+    let fill_count = counts[fill as usize] as usize;
+
+    // Only worth it if >75% is fill
+    if fill_count * 4 < n * 3 { return None; }
+
+    let entries: Vec<(u16, u8)> = track.iter().enumerate()
+        .filter(|(_, &b)| b != fill)
+        .map(|(i, &b)| (i as u16, b))
+        .collect();
+
+    // Cost: 1 (fill) + 2 (count) + entries * 3 (idx u16 + val u8)
+    let cost = 3 + entries.len() * 3;
+    if cost < n {
+        Some(TrackParams::Sparse { fill, entries })
+    } else {
+        None
+    }
+}
+
+/// Piecewise linear: 2-4 linear segments.
+fn detect_piecewise_linear(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 16 { return None; }
+
+    // Try splitting into 2, 3, or 4 equal segments
+    for num_segs in 2..=4usize {
+        let seg_len = n / num_segs;
+        if seg_len < 4 { continue; }
+
+        let mut segments: Vec<(u16, i16, i16)> = Vec::new();
+        let mut all_linear = true;
+
+        for s in 0..num_segs {
+            let start_idx = s * seg_len;
+            let end_idx = if s == num_segs - 1 { n } else { (s + 1) * seg_len };
+            let seg = &track[start_idx..end_idx];
+
+            let start_val = seg[0] as i16;
+            let step = seg[1] as i16 - start_val;
+            if !seg.windows(2).all(|w| w[1] as i16 - w[0] as i16 == step) {
+                all_linear = false;
+                break;
+            }
+            segments.push((start_idx as u16, start_val, step));
+        }
+
+        if all_linear {
+            // Cost: 1 (num_segs) + num_segs * 6 (idx u16 + start i16 + step i16)
+            let cost = 1 + segments.len() * 6;
+            if cost < n {
+                return Some(TrackParams::PiecewiseLinear { segments });
+            }
+        }
+    }
+    None
+}
+
+/// Mirror: second half is reverse of first half.
+fn detect_mirror(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 || n % 2 != 0 { return None; }
+
+    let half = n / 2;
+    let first = &track[..half];
+    let second = &track[half..];
+
+    if first.iter().zip(second.iter().rev()).all(|(a, b)| a == b) {
+        // Cost: half bytes (store first half only)
+        if half < n {
+            return Some(TrackParams::Mirror { half: first.to_vec() });
+        }
+    }
+    None
+}
+
 pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_const(track) {
         return TrackEncoding { pattern: PatternType::Const, params, track_idx };
@@ -534,6 +677,18 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     }
     if let Some(params) = detect_poly(track) {
         return TrackEncoding { pattern: PatternType::Poly, params, track_idx };
+    }
+    if let Some(params) = detect_mirror(track) {
+        return TrackEncoding { pattern: PatternType::Mirror, params, track_idx };
+    }
+    if let Some(params) = detect_sparse(track) {
+        return TrackEncoding { pattern: PatternType::Sparse, params, track_idx };
+    }
+    if let Some(params) = detect_piecewise_linear(track) {
+        return TrackEncoding { pattern: PatternType::PiecewiseLinear, params, track_idx };
+    }
+    if let Some(params) = detect_xor_mask(track) {
+        return TrackEncoding { pattern: PatternType::XorMask, params, track_idx };
     }
 
     TrackEncoding {

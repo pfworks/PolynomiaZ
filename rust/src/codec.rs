@@ -291,6 +291,10 @@ fn estimate_track_size(enc: &TrackEncoding, sectors: usize) -> usize {
         TrackParams::LinearWide { .. } => 19,
         TrackParams::LinearF64 { .. } => 18,
         TrackParams::DeltaF64 { deltas_f32, .. } => 10 + deltas_f32.len() * 4,
+        TrackParams::XorMask { inner_params, .. } => 2 + inner_params.len(),
+        TrackParams::Sparse { entries, .. } => 3 + entries.len() * 3,
+        TrackParams::PiecewiseLinear { segments } => 1 + segments.len() * 6,
+        TrackParams::Mirror { half } => half.len(),
     }
 }
 
@@ -372,6 +376,38 @@ fn encode_track(buf: &mut Vec<u8>, enc: &TrackEncoding, _sectors: usize, raw_com
             for &d in deltas_f32 {
                 buf.extend_from_slice(&d.to_le_bytes());
             }
+        }
+        TrackParams::XorMask { mask, inner_tag, inner_params } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::XorMask as u8);
+            buf.push(*mask);
+            buf.push(*inner_tag);
+            buf.extend_from_slice(inner_params);
+        }
+        TrackParams::Sparse { fill, entries } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::Sparse as u8);
+            buf.push(*fill);
+            buf.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+            for &(idx, val) in entries {
+                buf.extend_from_slice(&idx.to_le_bytes());
+                buf.push(val);
+            }
+        }
+        TrackParams::PiecewiseLinear { segments } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::PiecewiseLinear as u8);
+            buf.push(segments.len() as u8);
+            for &(start_idx, start_val, step) in segments {
+                buf.extend_from_slice(&start_idx.to_le_bytes());
+                buf.extend_from_slice(&start_val.to_le_bytes());
+                buf.extend_from_slice(&step.to_le_bytes());
+            }
+        }
+        TrackParams::Mirror { half } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::Mirror as u8);
+            buf.extend_from_slice(half);
         }
         TrackParams::Raw { data } => {
             if raw_comp == RawCompressor::Zlib {
@@ -527,6 +563,71 @@ fn decode_track(buf: &[u8], offset: usize, sectors: usize) -> Result<(u16, Vec<u
                 track.extend_from_slice(&current.to_le_bytes());
             }
             track.truncate(sectors);
+            track
+        }
+        PatternType::XorMask => {
+            let mask = buf[pos]; pos += 1;
+            let inner_tag = buf[pos]; pos += 1;
+            // Reconstruct inner pattern then XOR with mask
+            let inner_track = match PatternType::from_u8(inner_tag) {
+                Some(PatternType::Const) => {
+                    let val = buf[pos]; pos += 1;
+                    vec![val; sectors]
+                }
+                Some(PatternType::Linear) => {
+                    let start = i16::from_le_bytes(buf[pos..pos+2].try_into().unwrap());
+                    let step = i16::from_le_bytes(buf[pos+2..pos+4].try_into().unwrap());
+                    pos += 4;
+                    (0..sectors).map(|i| (start.wrapping_add((i as i16).wrapping_mul(step))) as u8).collect()
+                }
+                _ => { return Err(format!("Unsupported XorMask inner tag: {}", inner_tag)); }
+            };
+            inner_track.iter().map(|&b| b ^ mask).collect()
+        }
+        PatternType::Sparse => {
+            let fill = buf[pos]; pos += 1;
+            let count = u16::from_le_bytes(buf[pos..pos+2].try_into().unwrap()) as usize;
+            pos += 2;
+            let mut track = vec![fill; sectors];
+            for _ in 0..count {
+                let idx = u16::from_le_bytes(buf[pos..pos+2].try_into().unwrap()) as usize;
+                let val = buf[pos+2];
+                pos += 3;
+                if idx < track.len() { track[idx] = val; }
+            }
+            track
+        }
+        PatternType::PiecewiseLinear => {
+            let num_segs = buf[pos] as usize; pos += 1;
+            let mut segments = Vec::with_capacity(num_segs);
+            for _ in 0..num_segs {
+                let start_idx = u16::from_le_bytes(buf[pos..pos+2].try_into().unwrap());
+                let start_val = i16::from_le_bytes(buf[pos+2..pos+4].try_into().unwrap());
+                let step = i16::from_le_bytes(buf[pos+4..pos+6].try_into().unwrap());
+                pos += 6;
+                segments.push((start_idx, start_val, step));
+            }
+            let mut track = vec![0u8; sectors];
+            for (seg_idx, &(start_idx, start_val, step)) in segments.iter().enumerate() {
+                let end_idx = if seg_idx + 1 < segments.len() {
+                    segments[seg_idx + 1].0 as usize
+                } else {
+                    sectors
+                };
+                for i in start_idx as usize..end_idx {
+                    let offset = (i - start_idx as usize) as i16;
+                    track[i] = (start_val.wrapping_add(offset.wrapping_mul(step))) as u8;
+                }
+            }
+            track
+        }
+        PatternType::Mirror => {
+            let half_len = sectors / 2;
+            let half = &buf[pos..pos + half_len];
+            pos += half_len;
+            let mut track = Vec::with_capacity(sectors);
+            track.extend_from_slice(half);
+            track.extend(half.iter().rev());
             track
         }
         PatternType::Raw => {
@@ -751,5 +852,52 @@ mod tests {
         let compressed = encode_chunked(&data, RawCompressor::None, 512);
         assert_eq!(&compressed[0..4], b"PLTS");
         assert_eq!(compressed[4], 2); // FORMAT_VERSION
+    }
+
+    #[test]
+    fn test_xor_mask() {
+        // Linear ramp XORed with 0xFF: [255, 254, 253, ...]
+        let data: Vec<u8> = (0..64u8).map(|i| i ^ 0xFF).collect();
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("XOR mask 64B: {} -> {} bytes", data.len(), compressed.len());
+        assert!(compressed.len() < data.len());
+    }
+
+    #[test]
+    fn test_sparse() {
+        // Mostly zeros with a few non-zero values (star field row)
+        let mut data = vec![0u8; 256];
+        data[10] = 200;
+        data[50] = 255;
+        data[200] = 180;
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("Sparse 256B: {} -> {} bytes", data.len(), compressed.len());
+        assert!(compressed.len() < data.len() / 4);
+    }
+
+    #[test]
+    fn test_piecewise_linear() {
+        // Two linear segments: ramp up then ramp down
+        let mut data = Vec::new();
+        for i in 0..32u8 { data.push(i * 4); }      // 0,4,8,...,124
+        for i in 0..32u8 { data.push(128u8.wrapping_sub(i * 4)); } // 128,124,...,4
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("Piecewise 64B: {} -> {} bytes", data.len(), compressed.len());
+        assert!(compressed.len() < data.len());
+    }
+
+    #[test]
+    fn test_mirror() {
+        // Symmetric data (FIR filter coefficients style)
+        let half: Vec<u8> = (0..32).map(|i| (i * 8) as u8).collect();
+        let mut data = half.clone();
+        data.extend(half.iter().rev());
+        roundtrip(&data);
+        let compressed = encode(&data, RawCompressor::None);
+        println!("Mirror 64B: {} -> {} bytes", data.len(), compressed.len());
+        assert!(compressed.len() < data.len());
     }
 }
