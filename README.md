@@ -190,7 +190,11 @@ For record-oriented data (IoT telemetry, database rows, fixed-size structs), the
 pltz -r 21 telemetry.bin    # stride = record size in bytes
 ```
 
-Without columnar, a batch of 100 IoT readings (2.1KB) looks random at the byte level. With columnar (stride = record size), timestamps become a LINEAR_WIDE track, device IDs become CONST, sequence numbers become LINEAR, etc.
+The `-r` (record size) flag tells PLTZ that the input consists of fixed-size records of the given byte length. PLTZ transposes the data so that byte 0 of every record is contiguous, then byte 1 of every record, and so on. This turns interleaved multi-field records into per-field columns that PLTZ's pattern detectors can recognize.
+
+**Example:** 100 IoT readings of 21 bytes each (timestamp + device\_id + seq + battery + temp + ...). Without `-r`, PLTZ sees interleaved fields — no patterns. With `-r 21`, all timestamps are grouped together (LINEAR\_WIDE), all device IDs together (CONST), all sequence numbers together (LINEAR), etc.
+
+Without columnar, a batch of 100 IoT readings (2.1KB) compresses poorly. With columnar (stride = record size), compression improves dramatically because each field column has strong mathematical structure.
 
 ---
 

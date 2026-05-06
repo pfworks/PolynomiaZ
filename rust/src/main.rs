@@ -32,7 +32,8 @@ struct Cli {
     #[arg(long = "no-zlib")]
     no_zlib: bool,
 
-    /// Columnar pre-processing stride (e.g. 21, 1k)
+    /// Record size for columnar pre-processing (e.g. 21, 1k).
+    /// Transposes data so each byte-position across records is contiguous.
     #[arg(short = 'r', long = "record-size")]
     record_size: Option<String>,
 

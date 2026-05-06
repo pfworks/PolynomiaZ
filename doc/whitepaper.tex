@@ -296,7 +296,7 @@ pltz -k file.bin        # keep original
 pltz --no-zlib file.bin # skip deflate on raw tracks (no zlib dep)
 pltz -c file.bin        # output to stdout (pipeable)
 pltz -t file.bin.pltz   # test integrity
-pltz -r 21 file.bin     # columnar pre-processing (stride=21)
+pltz -r 21 file.bin     # columnar: input has 21-byte records
 pltz -C 64k file.bin    # chunked mode (per-section geometry)
 pltz -C auto file.bin   # auto-detect chunk size
 \end{lstlisting}
@@ -324,14 +324,16 @@ PLTZ occupies a unique niche: it recognizes \emph{semantic} structure (``this is
 
 \section{Columnar Pre-Processing}
 
-For record-oriented data (IoT telemetry, database rows, fixed-size structs), a columnar transform transposes the data so that each field position across all records is contiguous:
+For record-oriented data (IoT telemetry, database rows, fixed-size structs), a columnar transform transposes the data so that each byte-position across all records is contiguous:
 
 \begin{lstlisting}
 Input (row-major):  [R0F0 R0F1 R0F2] [R1F0 R1F1 R1F2] ...
 Output (col-major): [R0F0 R1F0 R2F0 ...] [R0F1 R1F1 R2F1 ...] ...
 \end{lstlisting}
 
-This exposes per-field patterns that are invisible in row-major layout. For example, a batch of 100 IoT readings with fields (timestamp, device\_id, sequence, battery, temperature) becomes:
+The \texttt{-r} (record size) flag tells PLTZ that the input consists of fixed-size records of the given byte length. PLTZ transposes the data so that byte 0 of every record is contiguous, then byte 1 of every record, and so on. This turns interleaved multi-field records into per-field columns that PLTZ's pattern detectors can recognize.
+
+For example, given 100 IoT readings of 21 bytes each (4-byte timestamp + 4-byte device\_id + 2-byte sequence + \ldots), running \texttt{pltz -r 21} groups all first-bytes together, all second-bytes together, etc. The 4 timestamp bytes across 100 records form a 400-byte column that LINEAR\_WIDE detects as a linear sequence. The result:
 \begin{itemize}
 \item Timestamp column: LINEAR\_WIDE (incrementing by sample interval)
 \item Device ID column: CONST (same device)
@@ -340,7 +342,7 @@ This exposes per-field patterns that are invisible in row-major layout. For exam
 \item Temperature column: DELTA (slowly varying)
 \end{itemize}
 
-The transform is invoked via \texttt{pltz -r <stride>} where stride is the record size in bytes. The format uses magic \texttt{PLTC} to signal that the inverse transform must be applied after decompression.
+The format uses magic \texttt{PLTC} to signal that the inverse transform must be applied after decompression. Decompression is transparent---\texttt{pltz -d} auto-detects the columnar wrapper.
 
 \section{Structured Encryption}
 

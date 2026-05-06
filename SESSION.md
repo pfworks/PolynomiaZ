@@ -199,9 +199,17 @@ Per platter:
 
 ### Columnar Pre-Processing
 
-Added `columnar.rs` — transposes record-oriented data (stride = record size) so each
-field is contiguous across all records. Exposed via `pltz -r <stride>` CLI flag and
-`encode_auto()` API. Uses PLTC magic to signal columnar wrapper in the format.
+Added `columnar.rs` — the `-r` (record size) flag tells PLTZ that input consists of
+fixed-size records. PLTZ transposes the data so that byte 0 of every record is
+contiguous, then byte 1, etc. This turns interleaved multi-field records into
+per-field columns that pattern detectors can recognize.
+
+Example: `pltz -r 21 telemetry.bin` means "each record is 21 bytes." PLTZ groups
+all byte-0s together, all byte-1s together, etc. If byte 0-3 is a timestamp across
+100 records, those 400 bytes now form a contiguous column that LINEAR_WIDE detects.
+
+Exposed via `pltz -r <stride>` CLI flag and `encode_auto()` API.
+Uses PLTC magic to signal columnar wrapper in the format.
 
 Results on IoT telemetry (100 records × 21 bytes):
 - Plain PLTZ: 2189B (no patterns detected in interleaved data)
