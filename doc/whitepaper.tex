@@ -310,7 +310,7 @@ pltz -b file.bin        # auto-select best compression settings
 pltz --analyze file.bin # analyze data and recommend settings
 \end{lstlisting}
 
-The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 18 pattern types are implemented in pure Rust. The implementation includes 37 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption.
+The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 18 pattern types are implemented in Rust, with periodic detection using the \texttt{rustfft} library (O($n \log n$) FFT, tracks up to 4096 bytes). The implementation includes 37 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption.
 
 \section{Comparison with Existing Work}
 
@@ -457,7 +457,7 @@ Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
 
 \textbf{Current limitations:}
 \begin{itemize}
-\item Periodic detection uses O($n^2$) DFT; skipped for tracks $>$ 128 bytes
+\item Periodic detection limited to tracks $\leq$ 4096 bytes (diminishing returns beyond)
 \item Slower than zlib due to adaptive geometry search (7 sector sizes $\times$ pattern detection)
 \item Cross-track requires $\geq$4 tracks with same pattern to activate
 \item Structured encryption uses demo cipher (not production-ready)
@@ -475,7 +475,6 @@ Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
 \textbf{Future work:}
 \begin{itemize}
 \item Production AEAD integration for structured encryption (ChaCha20-Poly1305)
-\item FFT library integration for faster periodic detection on large tracks
 \item Color image support (YCbCr channels)
 \item Motion compensation for video frame differencing
 \end{itemize}

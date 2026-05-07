@@ -129,7 +129,7 @@ rust/src/
 ├── lib.rs           — Module declarations
 ├── main.rs          — CLI binary (bzip2-style interface)
 ├── platter.rs       — Disk geometry, data layout
-├── analyzer.rs      — Pattern detection (11 types)
+├── analyzer.rs      — Pattern detection (18 types, rustfft for periodic)
 ├── codec.rs         — Binary encode/decode, adaptive geometry, multi-platter
 ├── columnar.rs      — Columnar pre-processing transform
 ├── cross_track.rs   — Cross-track meta-descriptor optimization
