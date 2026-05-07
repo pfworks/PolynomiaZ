@@ -7,6 +7,7 @@
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{tikz}
+\usepackage{float}
 
 \hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
 
@@ -143,7 +144,7 @@ Each track is tested against pattern detectors in priority order. When both RLE 
 
 \subsection{Pattern Types}
 
-\begin{table}[!ht]
+\begin{table}[H]
 \centering
 \small
 \begin{tabular}{@{}llll@{}}
@@ -217,7 +218,7 @@ The format has a fixed 12-byte header overhead. Each individual track costs 3 by
 
 \subsection{Structured Data (PLTZ Advantage)}
 
-\begin{table}[!ht]
+\begin{table}[H]
 \centering
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
@@ -237,7 +238,7 @@ Mixed structured + random 4KB & 4,096 B & 2,150 B & 2,381 B & 1.1$\times$ \\
 
 \subsection{Unstructured Data (PLTZ Disadvantage)}
 
-\begin{table}[!ht]
+\begin{table}[H]
 \centering
 \begin{tabular}{@{}lrrrl@{}}
 \toprule
@@ -315,7 +316,7 @@ The binary is approximately 1MB stripped, with no runtime dependencies beyond li
 
 \section{Comparison with Existing Work}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -381,7 +382,7 @@ PLTZ Structured Encryption (PSE) offers a third option: encrypt only the \emph{p
 
 \subsection{Results}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \begin{tabular}{@{}lrl@{}}
 \toprule
@@ -432,7 +433,7 @@ Cross-row optimization groups rows with identical encodings into a single meta-d
 
 \subsection{Results}
 
-\begin{table}[h]
+\begin{table}[H]
 \centering
 \begin{tabular}{@{}lrrr@{}}
 \toprule
