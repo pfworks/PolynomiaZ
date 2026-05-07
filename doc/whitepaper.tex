@@ -449,11 +449,13 @@ Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
 
 \subsection{Target Applications}
 
-\textbf{Space probe cameras:} Star fields (95\% black background), calibration dark frames (near-constant), flat fields (polynomial vignetting), illumination gradients. These image types are dominated by mathematical structure that PLTI exploits directly.
+\begin{description}
+\item[Space probe cameras:] Star fields (95\% black background), calibration dark frames (near-constant), flat fields (polynomial vignetting), illumination gradients. These image types are dominated by mathematical structure that PLTI exploits directly.
 
-\textbf{Security/surveillance cameras:} Static scenes where 90--99\% of pixels do not change between frames. Difference frames (current minus reference) become arrays of zeros with sparse motion residuals. Static difference frames compress to $\sim$100 bytes regardless of resolution. Only frames containing actual motion require significant storage.
+\item[Security/surveillance cameras:] Static scenes where 90--99\% of pixels do not change between frames. Difference frames (current minus reference) become arrays of zeros with sparse motion residuals. Static difference frames compress to $\sim$100 bytes regardless of resolution. Only frames containing actual motion require significant storage.
 
-\textbf{Scientific imaging:} Thermal cameras (smooth temperature gradients), spectrograms (periodic structure per row), oscilloscope captures (waveforms are mathematical functions by definition).
+\item[Scientific imaging:] Thermal cameras (smooth temperature gradients), spectrograms (periodic structure per row), oscilloscope captures (waveforms are mathematical functions by definition).
+\end{description}
 
 \section{Limitations and Future Work}
 
