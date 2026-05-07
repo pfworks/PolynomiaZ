@@ -821,7 +821,8 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
 }
 
 pub fn analyze_platter(tracks: &[Vec<u8>]) -> Vec<TrackEncoding> {
-    tracks.iter().enumerate()
+    use rayon::prelude::*;
+    tracks.par_iter().enumerate()
         .map(|(i, track)| analyze_track(track, i as u16))
         .collect()
 }

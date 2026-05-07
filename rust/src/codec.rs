@@ -231,23 +231,21 @@ pub fn decode(compressed: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn best_geometry(data: &[u8]) -> DiskGeometry {
-    let mut best_size = usize::MAX;
-    let mut best_geom = compute_geometry(data.len(), 256);
+    use rayon::prelude::*;
 
-    for &spt in SECTOR_CANDIDATES {
-        let geom = compute_geometry(data.len(), spt);
-        let tracks = lay_out(data, &geom);
-        let encodings = analyze_platter(&tracks);
-        let (meta_groups, remaining) = cross_track_optimize(encodings);
-        let individual_size: usize = remaining.iter().map(|e| estimate_track_size(e, spt)).sum();
-        let meta_size: usize = meta_groups.iter().map(|g| estimate_meta_size(g) + 3).sum(); // +3 for sentinel header
-        let size = individual_size + meta_size;
-        if size < best_size {
-            best_size = size;
-            best_geom = geom;
-        }
-    }
-    best_geom
+    SECTOR_CANDIDATES.par_iter()
+        .map(|&spt| {
+            let geom = compute_geometry(data.len(), spt);
+            let tracks = lay_out(data, &geom);
+            let encodings = analyze_platter(&tracks);
+            let (meta_groups, remaining) = cross_track_optimize(encodings);
+            let individual_size: usize = remaining.iter().map(|e| estimate_track_size(e, spt)).sum();
+            let meta_size: usize = meta_groups.iter().map(|g| estimate_meta_size(g) + 3).sum();
+            (geom, individual_size + meta_size)
+        })
+        .min_by_key(|&(_, size)| size)
+        .map(|(geom, _)| geom)
+        .unwrap_or_else(|| compute_geometry(data.len(), 256))
 }
 
 fn split_platters(tracks: &[Vec<u8>]) -> Vec<(Vec<TrackEncoding>, Vec<MetaGroup>)> {
