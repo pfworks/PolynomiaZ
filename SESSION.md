@@ -208,6 +208,7 @@ Per platter:
 - [x] Parallel processing (rayon — 9× speedup on test suite)
 - [x] Wire format specification (`doc/WIRE_FORMAT.md`)
 - [x] Auto-chunking for files >4GB (transparent, no user action needed)
+- [x] Smart stride auto-detection (byte-equality autocorrelation for `-b`/`--analyze`)
 
 ### Columnar Pre-Processing
 

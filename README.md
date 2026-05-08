@@ -217,6 +217,8 @@ The `-r` (record size) flag tells PLTZ that the input consists of fixed-size rec
 
 Without columnar, a batch of 100 IoT readings (2.1KB) compresses poorly. With columnar (stride = record size), compression improves dramatically because each field column has strong mathematical structure.
 
+When using `pltz -b`, the stride is auto-detected via byte-equality autocorrelation — no need to specify `-r` manually. The detector finds record boundaries by identifying byte positions that repeat at regular intervals (constant fields, null terminators, sync bytes).
+
 ---
 
 ## Structured Encryption (⚠️ DEMO)

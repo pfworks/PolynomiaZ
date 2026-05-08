@@ -354,6 +354,8 @@ For example, given 100 IoT readings of 21 bytes each (4-byte timestamp + 4-byte 
 
 The format uses magic \texttt{PLTC} to signal that the inverse transform must be applied after decompression. Decompression is transparent---\texttt{pltz -d} auto-detects the columnar wrapper.
 
+When using \texttt{pltz -b} (auto-optimize), the stride is detected automatically via byte-equality autocorrelation: for each candidate stride $s$, the encoder counts positions where $\texttt{data}[i] = \texttt{data}[i+s]$. High correlation indicates a fixed-size record with constant fields repeating at interval $s$. This correctly identifies record sizes for IoT telemetry (21 bytes), GPS fixes (16 bytes), and CCSDS packets (30 bytes) without user input.
+
 \section{Structured Encryption}
 
 \begin{center}
