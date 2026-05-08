@@ -35,6 +35,7 @@ pub struct VideoParams {
 pub type RgbFrame = Vec<u8>;
 
 /// Encode a sequence of RGB frames into PLTV format.
+/// GOP structure: I P P P ... with optional B-frames (I B P B P B P ...)
 pub fn encode_video(frames: &[RgbFrame], params: VideoParams) -> Vec<u8> {
     let w = params.width as usize;
     let h = params.height as usize;
@@ -47,37 +48,64 @@ pub fn encode_video(frames: &[RgbFrame], params: VideoParams) -> Vec<u8> {
     buf.push(params.quality);
     buf.extend_from_slice(&(frames.len() as u16).to_le_bytes());
 
+    // Convert all frames to YCbCr upfront
+    let ycbcr_frames: Vec<(Vec<u8>, Vec<u8>, Vec<u8>)> = frames.iter()
+        .map(|f| rgb_to_ycbcr(f, w, h))
+        .collect();
+
     let mut reference_y: Vec<u8> = Vec::new();
     let mut reference_cb: Vec<u8> = Vec::new();
     let mut reference_cr: Vec<u8> = Vec::new();
 
-    for (i, frame) in frames.iter().enumerate() {
+    for i in 0..ycbcr_frames.len() {
+        let (ref y, ref cb, ref cr) = ycbcr_frames[i];
         let is_iframe = i % params.gop_size as usize == 0;
-
-        // Convert RGB to YCbCr
-        let (y, cb, cr) = rgb_to_ycbcr(frame, w, h);
 
         if is_iframe {
             buf.push(0); // I-frame
-            let frame_data = encode_iframe(&y, &cb, &cr, w, h, params.quality);
+            let frame_data = encode_iframe(y, cb, cr, w, h, params.quality);
             buf.extend_from_slice(&(frame_data.len() as u32).to_le_bytes());
             buf.extend_from_slice(&frame_data);
-            reference_y = y;
-            reference_cb = cb;
-            reference_cr = cr;
+            reference_y = y.clone();
+            reference_cb = cb.clone();
+            reference_cr = cr.clone();
         } else {
-            buf.push(1); // P-frame
-            let frame_data = encode_pframe(
-                &y, &cb, &cr,
-                &reference_y, &reference_cb, &reference_cr,
-                w, h, params.quality,
-            );
-            buf.extend_from_slice(&(frame_data.len() as u32).to_le_bytes());
-            buf.extend_from_slice(&frame_data);
-            // Update reference to current (for next P-frame)
-            reference_y = y;
-            reference_cb = cb;
-            reference_cr = cr;
+            // Check if B-frame would be better (has future reference)
+            let next_ref_idx = ((i / params.gop_size as usize) + 1) * params.gop_size as usize;
+            let use_bframe = next_ref_idx < ycbcr_frames.len() && i % 2 == 1;
+
+            if use_bframe {
+                // B-frame: pick better reference (past or future)
+                let (ref future_y, ref future_cb, ref future_cr) = ycbcr_frames[std::cmp::min(next_ref_idx, ycbcr_frames.len() - 1)];
+
+                // Compare SAD against past vs future reference
+                let sad_past: u64 = y.iter().zip(reference_y.iter())
+                    .map(|(&a, &b)| (a as i16 - b as i16).unsigned_abs() as u64).sum();
+                let sad_future: u64 = y.iter().zip(future_y.iter())
+                    .map(|(&a, &b)| (a as i16 - b as i16).unsigned_abs() as u64).sum();
+
+                let (best_ref_y, best_ref_cb, best_ref_cr, ref_dir) = if sad_future < sad_past {
+                    (future_y.as_slice(), future_cb.as_slice(), future_cr.as_slice(), 1u8)
+                } else {
+                    (reference_y.as_slice(), reference_cb.as_slice(), reference_cr.as_slice(), 0u8)
+                };
+
+                buf.push(2); // B-frame
+                let mut frame_data = vec![ref_dir]; // which reference (0=past, 1=future)
+                let pframe_data = encode_pframe(y, cb, cr, best_ref_y, best_ref_cb, best_ref_cr, w, h, params.quality);
+                frame_data.extend_from_slice(&pframe_data);
+                buf.extend_from_slice(&(frame_data.len() as u32).to_le_bytes());
+                buf.extend_from_slice(&frame_data);
+                // B-frames don't update reference
+            } else {
+                buf.push(1); // P-frame
+                let frame_data = encode_pframe(y, cb, cr, &reference_y, &reference_cb, &reference_cr, w, h, params.quality);
+                buf.extend_from_slice(&(frame_data.len() as u32).to_le_bytes());
+                buf.extend_from_slice(&frame_data);
+                reference_y = y.clone();
+                reference_cb = cb.clone();
+                reference_cr = cr.clone();
+            }
         }
     }
 
@@ -107,25 +135,78 @@ pub fn decode_video(data: &[u8]) -> Result<(Vec<RgbFrame>, VideoParams), String>
     let mut ref_cb: Vec<u8> = Vec::new();
     let mut ref_cr: Vec<u8> = Vec::new();
 
+    // First pass: collect all frame metadata
+    struct FrameInfo { frame_type: u8, data_offset: usize, data_len: usize }
+    let mut frame_infos: Vec<FrameInfo> = Vec::new();
+    let mut scan_offset = 12;
     for _ in 0..num_frames {
-        let frame_type = data[offset]; offset += 1;
-        let frame_len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
-        offset += 4;
-        let frame_data = &data[offset..offset + frame_len];
-        offset += frame_len;
+        let frame_type = data[scan_offset]; scan_offset += 1;
+        let frame_len = u32::from_le_bytes(data[scan_offset..scan_offset + 4].try_into().unwrap()) as usize;
+        scan_offset += 4;
+        frame_infos.push(FrameInfo { frame_type, data_offset: scan_offset, data_len: frame_len });
+        scan_offset += frame_len;
+    }
 
-        let (y, cb, cr) = if frame_type == 0 {
-            decode_iframe(frame_data, w, h)?
+    // Decode I and P frames first to build reference list
+    let mut decoded_ycbcr: Vec<Option<(Vec<u8>, Vec<u8>, Vec<u8>)>> = vec![None; num_frames];
+    let mut ref_y: Vec<u8> = Vec::new();
+    let mut ref_cb: Vec<u8> = Vec::new();
+    let mut ref_cr: Vec<u8> = Vec::new();
+
+    // Find next I/P frame after each position (for B-frame future reference)
+    let mut next_ref: Vec<usize> = vec![0; num_frames];
+    let mut last_ref = num_frames.saturating_sub(1);
+    for i in (0..num_frames).rev() {
+        if frame_infos[i].frame_type != 2 { last_ref = i; }
+        next_ref[i] = last_ref;
+    }
+
+    // Decode I/P frames
+    for i in 0..num_frames {
+        let fi = &frame_infos[i];
+        let frame_data = &data[fi.data_offset..fi.data_offset + fi.data_len];
+
+        if fi.frame_type == 0 {
+            let (y, cb, cr) = decode_iframe(frame_data, w, h)?;
+            ref_y = y.clone(); ref_cb = cb.clone(); ref_cr = cr.clone();
+            decoded_ycbcr[i] = Some((y, cb, cr));
+        } else if fi.frame_type == 1 {
+            let (y, cb, cr) = decode_pframe(frame_data, &ref_y, &ref_cb, &ref_cr, w, h)?;
+            ref_y = y.clone(); ref_cb = cb.clone(); ref_cr = cr.clone();
+            decoded_ycbcr[i] = Some((y, cb, cr));
+        }
+        // Skip B-frames for now
+    }
+
+    // Decode B-frames (they reference already-decoded I/P frames)
+    for i in 0..num_frames {
+        let fi = &frame_infos[i];
+        if fi.frame_type != 2 { continue; }
+
+        let frame_data = &data[fi.data_offset..fi.data_offset + fi.data_len];
+        let ref_dir = frame_data[0];
+        let pframe_data = &frame_data[1..];
+
+        // Find past and future references
+        let past_idx = (0..i).rev().find(|&j| frame_infos[j].frame_type != 2).unwrap_or(0);
+        let future_idx = next_ref[i];
+
+        let (ry, rcb, rcr) = if ref_dir == 1 && decoded_ycbcr[future_idx].is_some() {
+            let f = decoded_ycbcr[future_idx].as_ref().unwrap();
+            (&f.0, &f.1, &f.2)
         } else {
-            decode_pframe(frame_data, &ref_y, &ref_cb, &ref_cr, w, h)?
+            let p = decoded_ycbcr[past_idx].as_ref().unwrap();
+            (&p.0, &p.1, &p.2)
         };
 
-        let rgb = ycbcr_to_rgb(&y, &cb, &cr, w, h);
-        frames.push(rgb);
+        let (y, cb, cr) = decode_pframe(pframe_data, ry, rcb, rcr, w, h)?;
+        decoded_ycbcr[i] = Some((y, cb, cr));
+    }
 
-        ref_y = y;
-        ref_cb = cb;
-        ref_cr = cr;
+    // Convert all to RGB
+    for i in 0..num_frames {
+        let (ref y, ref cb, ref cr) = decoded_ycbcr[i].as_ref().ok_or("Missing frame")?;
+        frames.push(ycbcr_to_rgb(y, cb, cr, w, h));
     }
 
     Ok((frames, params))
@@ -227,8 +308,26 @@ fn encode_pframe(
     ref_y: &[u8], ref_cb: &[u8], ref_cr: &[u8],
     w: usize, h: usize, quality: u8,
 ) -> Vec<u8> {
-    // Compute difference (current - reference + 128 to keep unsigned)
-    let dy: Vec<u8> = y.iter().zip(ref_y.iter())
+    // Block-based motion compensation on Y channel
+    let block_size = 16;
+    let search_range: i32 = 16;
+    let bw = (w + block_size - 1) / block_size;
+    let bh = (h + block_size - 1) / block_size;
+
+    // Find motion vectors for each block
+    let mut mvs: Vec<(i8, i8)> = Vec::with_capacity(bw * bh);
+    for by in 0..bh {
+        for bx in 0..bw {
+            let mv = find_motion_vector(y, ref_y, w, h, bx, by, block_size, search_range);
+            mvs.push(mv);
+        }
+    }
+
+    // Build motion-compensated prediction
+    let predicted_y = apply_motion_compensation(ref_y, &mvs, w, h, block_size, bw, bh);
+
+    // Compute residual (current - predicted + 128)
+    let dy: Vec<u8> = y.iter().zip(predicted_y.iter())
         .map(|(&a, &b)| ((a as i16 - b as i16 + 128).clamp(0, 255)) as u8)
         .collect();
     let dcb: Vec<u8> = cb.iter().zip(ref_cb.iter())
@@ -241,12 +340,18 @@ fn encode_pframe(
     let cw = w / 2;
     let ch = h / 2;
 
-    // Compress difference frames (mostly 128 = no change → CONST)
     let dy_comp = compress_image(&dy, ImageParams { width: w as u16, height: h as u16, bit_depth: 8, quality });
     let dcb_comp = compress_image(&dcb, ImageParams { width: cw as u16, height: ch as u16, bit_depth: 8, quality });
     let dcr_comp = compress_image(&dcr, ImageParams { width: cw as u16, height: ch as u16, bit_depth: 8, quality });
 
     let mut buf = Vec::new();
+    // Motion vectors: num_blocks(u16) + [(dx i8, dy i8)] per block
+    buf.extend_from_slice(&(mvs.len() as u16).to_le_bytes());
+    for &(dx, dy_mv) in &mvs {
+        buf.push(dx as u8);
+        buf.push(dy_mv as u8);
+    }
+    // Compressed residuals
     buf.extend_from_slice(&(dy_comp.len() as u32).to_le_bytes());
     buf.extend_from_slice(&dy_comp);
     buf.extend_from_slice(&(dcb_comp.len() as u32).to_le_bytes());
@@ -256,13 +361,103 @@ fn encode_pframe(
     buf
 }
 
+fn find_motion_vector(
+    current: &[u8], reference: &[u8],
+    w: usize, h: usize,
+    bx: usize, by: usize,
+    block_size: usize, search_range: i32,
+) -> (i8, i8) {
+    let x0 = bx * block_size;
+    let y0 = by * block_size;
+    let mut best_dx: i8 = 0;
+    let mut best_dy: i8 = 0;
+    let mut best_sad = u64::MAX;
+
+    for dy in -search_range..=search_range {
+        for dx in -search_range..=search_range {
+            let rx = x0 as i32 + dx;
+            let ry = y0 as i32 + dy;
+            if rx < 0 || ry < 0 { continue; }
+
+            let mut sad: u64 = 0;
+            let mut valid = true;
+            for py in 0..block_size {
+                for px in 0..block_size {
+                    let cx = x0 + px;
+                    let cy = y0 + py;
+                    let refx = (rx + px as i32) as usize;
+                    let refy = (ry + py as i32) as usize;
+                    if cx >= w || cy >= h || refx >= w || refy >= h {
+                        valid = false;
+                        break;
+                    }
+                    let c = current[cy * w + cx] as i32;
+                    let r = reference[refy * w + refx] as i32;
+                    sad += (c - r).unsigned_abs() as u64;
+                }
+                if !valid { break; }
+            }
+            if valid && sad < best_sad {
+                best_sad = sad;
+                best_dx = dx as i8;
+                best_dy = dy as i8;
+            }
+        }
+    }
+    (best_dx, best_dy)
+}
+
+fn apply_motion_compensation(
+    reference: &[u8], mvs: &[(i8, i8)],
+    w: usize, h: usize, block_size: usize,
+    bw: usize, _bh: usize,
+) -> Vec<u8> {
+    let mut predicted = vec![128u8; w * h];
+    for (idx, &(dx, dy)) in mvs.iter().enumerate() {
+        let bx = idx % bw;
+        let by = idx / bw;
+        let x0 = bx * block_size;
+        let y0 = by * block_size;
+        for py in 0..block_size {
+            for px in 0..block_size {
+                let cx = x0 + px;
+                let cy = y0 + py;
+                let rx = (x0 as i32 + dx as i32 + px as i32) as usize;
+                let ry = (y0 as i32 + dy as i32 + py as i32) as usize;
+                if cx < w && cy < h && rx < w && ry < h {
+                    predicted[cy * w + cx] = reference[ry * w + rx];
+                }
+            }
+        }
+    }
+    predicted
+}
+
 fn decode_pframe(
     data: &[u8],
     ref_y: &[u8], ref_cb: &[u8], ref_cr: &[u8],
     w: usize, h: usize,
 ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
     let mut pos = 0;
+    let block_size = 16;
+    let bw = (w + block_size - 1) / block_size;
+    let bh = (h + block_size - 1) / block_size;
 
+    // Read motion vectors
+    let num_mvs = u16::from_le_bytes(data[pos..pos + 2].try_into().unwrap()) as usize;
+    pos += 2;
+    let mut mvs: Vec<(i8, i8)> = Vec::with_capacity(num_mvs);
+    for _ in 0..num_mvs {
+        let dx = data[pos] as i8;
+        let dy_mv = data[pos + 1] as i8;
+        pos += 2;
+        mvs.push((dx, dy_mv));
+    }
+
+    // Apply motion compensation to get predicted Y
+    let predicted_y = apply_motion_compensation(ref_y, &mvs, w, h, block_size, bw, bh);
+
+    // Read compressed residuals
     let dy_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize; pos += 4;
     let (dy, _) = decompress_image(&data[pos..pos + dy_len])?; pos += dy_len;
 
@@ -272,9 +467,9 @@ fn decode_pframe(
     let dcr_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize; pos += 4;
     let (dcr, _) = decompress_image(&data[pos..pos + dcr_len])?;
 
-    // Reconstruct: current = reference + (diff - 128)
-    let y: Vec<u8> = dy.iter().zip(ref_y.iter())
-        .map(|(&d, &r)| ((r as i16 + d as i16 - 128).clamp(0, 255)) as u8)
+    // Reconstruct: current = predicted + (residual - 128)
+    let y: Vec<u8> = dy.iter().zip(predicted_y.iter())
+        .map(|(&d, &p)| ((p as i16 + d as i16 - 128).clamp(0, 255)) as u8)
         .collect();
     let cb: Vec<u8> = dcb.iter().zip(ref_cb.iter())
         .map(|(&d, &r)| ((r as i16 + d as i16 - 128).clamp(0, 255)) as u8)
