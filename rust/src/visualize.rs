@@ -2,11 +2,18 @@
 
 use pltz::platter::*;
 use pltz::analyzer::*;
+use pltz::columnar;
 
 pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
-    // Use adaptive geometry (same as encoder)
-    let mut best_geom = compute_geometry(data.len(), 256);
+    // Use the same logic as -b: try columnar strides, pick best view
+    let strides = super::detect_strides(data);
+
+    let mut best_data: Vec<u8> = data.to_vec();
     let mut best_raw = usize::MAX;
+    let mut best_geom = compute_geometry(data.len(), 256);
+    let mut used_stride: Option<usize> = None;
+
+    // Try plain
     for &spt in SECTOR_CANDIDATES {
         let geom = compute_geometry(data.len(), spt);
         let tracks = lay_out(data, &geom);
@@ -15,14 +22,39 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
         if raw_count < best_raw {
             best_raw = raw_count;
             best_geom = geom;
+            best_data = data.to_vec();
+            used_stride = None;
         }
     }
 
-    let tracks = lay_out(data, &best_geom);
+    // Try columnar strides
+    for stride in &strides {
+        let stride = *stride;
+        if stride < 2 || stride >= data.len() { continue; }
+        let transformed = pltz::columnar::columnar_transform(data, stride);
+        for &spt in SECTOR_CANDIDATES {
+            let geom = compute_geometry(transformed.len(), spt);
+            let tracks = lay_out(&transformed, &geom);
+            let encodings = analyze_platter(&tracks);
+            let raw_count = encodings.iter().filter(|e| e.pattern == PatternType::Raw).count();
+            if raw_count < best_raw {
+                best_raw = raw_count;
+                best_geom = geom;
+                best_data = transformed.clone();
+                used_stride = Some(stride);
+            }
+        }
+    }
+
+    let tracks = lay_out(&best_data, &best_geom);
     let encodings = analyze_platter(&tracks);
 
     let num_tracks = encodings.len();
     let spt = best_geom.sectors_per_track;
+    let subtitle = match used_stride {
+        Some(s) => format!("columnar stride={}, spt={}", s, spt),
+        None => format!("spt={}", spt),
+    };
 
     let cx = 300.0f64;
     let cy = 300.0f64;
@@ -59,8 +91,8 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
         cx, cy as i32 - 8, num_tracks
     ));
     svg.push_str(&format!(
-        "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" fill=\"white\" font-size=\"11\" font-family=\"monospace\">spt={}</text>\n",
-        cx, cy as i32 + 8, spt
+        "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" fill=\"white\" font-size=\"9\" font-family=\"monospace\">{}</text>\n",
+        cx, cy as i32 + 8, subtitle
     ));
 
     // Legend
