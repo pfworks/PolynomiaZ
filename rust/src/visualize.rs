@@ -58,6 +58,27 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
         None => format!("spt={}", spt),
     };
 
+    // Determine which RAW tracks benefit from deflate
+    use flate2::write::DeflateEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    use std::collections::HashSet;
+
+    let mut deflatable: HashSet<u16> = HashSet::new();
+    for enc in &encodings {
+        if enc.pattern == PatternType::Raw {
+            if let TrackParams::Raw { data } = &enc.params {
+                let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
+                let _ = encoder.write_all(data);
+                if let Ok(compressed) = encoder.finish() {
+                    if compressed.len() < data.len() {
+                        deflatable.insert(enc.track_idx);
+                    }
+                }
+            }
+        }
+    }
+
     // Split into platters
     let structured: Vec<&TrackEncoding> = encodings.iter().filter(|e| e.pattern != PatternType::Raw && e.pattern != PatternType::RawCompressed).collect();
     let raw: Vec<&TrackEncoding> = encodings.iter().filter(|e| e.pattern == PatternType::Raw || e.pattern == PatternType::RawCompressed).collect();
@@ -69,7 +90,7 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
     svg.push_str("<rect width=\"100%\" height=\"100%\" fill=\"#1a1a2e\"/>\n");
 
     // Helper to draw a platter
-    let draw_platter = |svg: &mut String, cx: f64, cy: f64, tracks_to_draw: &[&TrackEncoding], label: &str| {
+    let draw_platter = |svg: &mut String, cx: f64, cy: f64, tracks_to_draw: &[&TrackEncoding], label: &str, deflatable: &HashSet<u16>| {
         let r_min = 50.0f64;
         let r_max = 200.0f64;
         let n = tracks_to_draw.len();
@@ -78,7 +99,15 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
         for (i, enc) in tracks_to_draw.iter().enumerate() {
             let r_outer = r_max - i as f64 * tw;
             let r_inner = r_outer - tw + 1.0;
-            let color = pattern_color(enc.pattern);
+            let color = if enc.pattern == PatternType::Raw {
+                if deflatable.contains(&enc.track_idx) {
+                    "#616161" // darker gray = deflated
+                } else {
+                    "#BDBDBD" // lighter gray = stored raw
+                }
+            } else {
+                pattern_color(enc.pattern)
+            };
             let r_mid = (r_outer + r_inner) / 2.0;
             let sw = (tw - 1.0).max(1.0).min(20.0);
             svg.push_str(&format!(
@@ -104,14 +133,14 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
     if has_two_platters {
         // Platter 0 (structured) on left
         svg.push_str("<text x=\"240\" y=\"580\" text-anchor=\"middle\" fill=\"#aaa\" font-size=\"12\" font-family=\"monospace\">Platter 0 (Structured)</text>\n");
-        draw_platter(&mut svg, 240.0, 310.0, &structured, "Platter 0");
+        draw_platter(&mut svg, 240.0, 310.0, &structured, "Platter 0", &deflatable);
 
         // Platter 1 (raw) on right
         svg.push_str("<text x=\"700\" y=\"580\" text-anchor=\"middle\" fill=\"#aaa\" font-size=\"12\" font-family=\"monospace\">Platter 1 (Raw)</text>\n");
-        draw_platter(&mut svg, 700.0, 310.0, &raw, "Platter 1");
+        draw_platter(&mut svg, 700.0, 310.0, &raw, "Platter 1", &deflatable);
     } else {
         let all: Vec<&TrackEncoding> = encodings.iter().collect();
-        draw_platter(&mut svg, 300.0, 310.0, &all, &subtitle);
+        draw_platter(&mut svg, 300.0, 310.0, &all, &subtitle, &deflatable);
     }
 
     // Legend
@@ -128,18 +157,50 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
     ));
 
     for &pat in &seen {
-        let color = pattern_color(pat);
-        let name = pattern_name(pat);
-        let count = encodings.iter().filter(|e| e.pattern == pat).count();
-        svg.push_str(&format!(
-            "<rect x=\"{}\" y=\"{}\" width=\"14\" height=\"14\" fill=\"{}\" rx=\"2\"/>\n",
-            legend_x, legend_y - 11, color
-        ));
-        svg.push_str(&format!(
-            "<text x=\"{}\" y=\"{}\" fill=\"white\" font-size=\"11\" font-family=\"monospace\">{} ({})</text>\n",
-            legend_x + 20, legend_y, name, count
-        ));
-        legend_y += 20;
+        if pat == PatternType::Raw || pat == PatternType::RawCompressed {
+            // Show two entries for RAW
+            let deflated_count = encodings.iter()
+                .filter(|e| e.pattern == PatternType::Raw && deflatable.contains(&e.track_idx))
+                .count();
+            let raw_count = encodings.iter()
+                .filter(|e| e.pattern == PatternType::Raw && !deflatable.contains(&e.track_idx))
+                .count();
+            if deflated_count > 0 {
+                svg.push_str(&format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"14\" height=\"14\" fill=\"#616161\" rx=\"2\"/>\n",
+                    legend_x, legend_y - 11
+                ));
+                svg.push_str(&format!(
+                    "<text x=\"{}\" y=\"{}\" fill=\"white\" font-size=\"11\" font-family=\"monospace\">RAW deflated ({})</text>\n",
+                    legend_x + 20, legend_y, deflated_count
+                ));
+                legend_y += 20;
+            }
+            if raw_count > 0 {
+                svg.push_str(&format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"14\" height=\"14\" fill=\"#BDBDBD\" rx=\"2\"/>\n",
+                    legend_x, legend_y - 11
+                ));
+                svg.push_str(&format!(
+                    "<text x=\"{}\" y=\"{}\" fill=\"white\" font-size=\"11\" font-family=\"monospace\">RAW stored ({})</text>\n",
+                    legend_x + 20, legend_y, raw_count
+                ));
+                legend_y += 20;
+            }
+        } else {
+            let color = pattern_color(pat);
+            let name = pattern_name(pat);
+            let count = encodings.iter().filter(|e| e.pattern == pat).count();
+            svg.push_str(&format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"14\" height=\"14\" fill=\"{}\" rx=\"2\"/>\n",
+                legend_x, legend_y - 11, color
+            ));
+            svg.push_str(&format!(
+                "<text x=\"{}\" y=\"{}\" fill=\"white\" font-size=\"11\" font-family=\"monospace\">{} ({})</text>\n",
+                legend_x + 20, legend_y, name, count
+            ));
+            legend_y += 20;
+        }
     }
 
     // Title
