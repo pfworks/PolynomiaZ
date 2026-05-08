@@ -255,6 +255,11 @@ fn best_geometry(data: &[u8]) -> DiskGeometry {
         .unwrap_or_else(|| compute_geometry(data.len(), 256))
 }
 
+/// Public access to the adaptive geometry selection (for visualization).
+pub fn best_geometry_pub(data: &[u8]) -> DiskGeometry {
+    best_geometry(data)
+}
+
 fn split_platters(tracks: &[Vec<u8>]) -> Vec<(Vec<TrackEncoding>, Vec<MetaGroup>)> {
     let encodings = analyze_platter(tracks);
     let (meta_groups, remaining) = cross_track_optimize(encodings);
