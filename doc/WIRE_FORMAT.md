@@ -89,6 +89,7 @@ Offset  Size  Field
 | 17 | INTERLEAVED_LINEAR | `count(u16) + start_a(i16) + step_a(i16) + start_b(i16) + step_b(i16)` |
 | 18 | EXPONENTIAL | `count(u16) + base(f32) + ratio(f32)` |
 | 19 | DELTA_RLE | `start(u8) + num_runs(u16) + [delta(i8) + count(u8)] × N` |
+| 20 | BIT_PACKED | `bits(u8) + packed_data(⌈sectors×bits/8⌉ bytes)` |
 
 ### RAW_COMPRESSED Methods
 
@@ -201,6 +202,7 @@ Given pattern tag and payload, reconstruct `sectors` bytes:
 - **INTERLEAVED_LINEAR:** `output[2i] = (start_a + i*step_a) as u8`, `output[2i+1] = (start_b + i*step_b) as u8`.
 - **EXPONENTIAL:** `output[i] = round(base * ratio^i) as u8`.
 - **DELTA_RLE:** Start with `start`, expand each (delta, count) run: add `delta` to current value `count` times.
+- **BIT_PACKED:** Read `bits` per value from packed data (MSB first within each byte). Each value is `bits` wide.
 - **RAW:** Copy bytes directly.
 - **RAW_COMPRESSED:** Decompress with indicated method, then copy.
 

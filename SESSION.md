@@ -55,7 +55,8 @@ Patterns are tried in order of compactness (RLE vs REPEAT picks smaller):
 14. INTERLEAVED_LINEAR (10 bytes) — two interleaved arithmetic sequences
 15. EXPONENTIAL (10 bytes) — geometric sequence a×r^i
 16. DELTA_RLE (3 + 2×runs) — run-length encoded deltas
-17. RAW (n bytes) — fallback, optionally deflate-compressed
+17. BIT_PACKED (1 + ⌈n×bits/8⌉) — values fit in <7 bits, stored packed
+18. RAW (n bytes) — fallback, optionally deflate-compressed
 
 ### Cross-Track Optimization
 
@@ -190,7 +191,7 @@ Per platter:
 
 - [x] Python prototype (reference implementation, now in tests/lib/)
 - [x] Rust implementation with bzip2-style CLI
-- [x] 18 pattern types including wide-word and f64 analysis
+- [x] 19 pattern types including wide-word and f64 analysis
 - [x] Cross-track meta-descriptors
 - [x] Adaptive sector sizing (7 geometries)
 - [x] Multi-platter splitting

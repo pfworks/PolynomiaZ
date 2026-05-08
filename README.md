@@ -11,7 +11,7 @@ PolynomiaZ maps input data onto a virtual disk platter geometry (concentric trac
 ### How It Works
 
 1. **Layout** — Input bytes are arranged into tracks × sectors (configurable geometry)
-2. **Analysis** — Each track is tested against 18 pattern types
+2. **Analysis** — Each track is tested against 19 pattern types
 3. **Cross-track** — Groups of tracks with related parameters are merged into meta-descriptors
 4. **Encoding** — Matched patterns become compact function descriptors; unmatched tracks stored raw
 5. **Adaptive geometry** — 7 sector sizes are tried; the best-compressing geometry wins
@@ -38,6 +38,7 @@ PolynomiaZ maps input data onto a virtual disk platter geometry (concentric trac
 | INTERLEAVED_LINEAR | Two interleaved arithmetic sequences | 10 bytes |
 | EXPONENTIAL | Geometric sequence a×r^i | 10 bytes |
 | DELTA_RLE | Run-length encoded deltas (staircases) | 3 + 2×runs |
+| BIT_PACKED | Values fit in <7 bits, stored packed | 1 + ⌈n×bits/8⌉ |
 | RAW | No pattern (optional deflate fallback) | n bytes |
 
 ### Cross-Track Meta-Descriptors
@@ -175,7 +176,7 @@ Per platter:
 
 ## Roadmap
 
-- [x] Rust implementation with 18 pattern types
+- [x] Rust implementation with 19 pattern types
 - [x] Binary format (12-byte header + compact track encoding)
 - [x] Adaptive sector sizing (7 geometries)
 - [x] Multi-platter splitting (structured vs raw)
