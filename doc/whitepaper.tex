@@ -459,6 +459,27 @@ Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
 \item[Scientific imaging:] Thermal cameras (smooth temperature gradients), spectrograms (periodic structure per row), oscilloscope captures (waveforms are mathematical functions by definition).
 \end{description}
 
+\subsection{Video Codec (PLTV)}
+
+The image codec extends to video with temporal prediction. PLTV uses YCbCr 4:2:0 color, 16$\times$16 block-based motion compensation ($\pm$16 pixel search), and B-frames (bidirectional prediction):
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Scenario} & \textbf{PLTV} & \textbf{H.264} & \textbf{MJPEG} \\
+\midrule
+Noisy surveillance ($q$=30) & \textbf{22.8:1} & 11.7:1 & 11.5:1 \\
+Noisy surveillance ($q$=50) & \textbf{63.5:1} & 11.7:1 & 11.5:1 \\
+Clean synthetic & 78:1 & \textbf{1874:1} & 95:1 \\
+\bottomrule
+\end{tabular}
+\caption{PLTV vs.\ H.264 and MJPEG on 2-minute surveillance video (160$\times$120, 5fps).}
+\end{table}
+
+PLTV wins on real-world noisy surveillance because sensor noise defeats H.264's motion estimation (it encodes noise as ``motion''). PLTV's quality threshold absorbs the noise, collapsing static regions to CONST regardless of noise level. H.264 wins on clean synthetic content where its block matching and DCT are ideal.
+
 \section{Limitations and Future Work}
 
 \textbf{Current limitations:}
@@ -481,8 +502,7 @@ Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
 \textbf{Future work:}
 \begin{itemize}
 \item Production AEAD integration for structured encryption (ChaCha20-Poly1305)
-\item Color image support (YCbCr channels)
-\item Motion compensation for video frame differencing
+\item Higher-resolution video benchmarks and scene change detection
 \end{itemize}
 
 \section{Conclusion}

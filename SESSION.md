@@ -271,3 +271,24 @@ consecutive frames are almost entirely zero (nothing moved). Each difference fra
 compresses to ~100 bytes (all rows CONST(0) in one meta-group). Only frames with
 actual motion have significant data. This could reduce storage 10-50× vs H.264 on
 the static portions of 24/7 surveillance footage.
+
+### Video Codec (PLTV) — Motion Compensation + B-frames
+
+Added `video.rs` — color lossy video with:
+- YCbCr 4:2:0 chroma subsampling
+- 16×16 block-based motion compensation (±16 pixel search)
+- B-frames (bidirectional prediction, picks better reference)
+- GOP structure: I B P B P ...
+
+**Benchmark (2 min, 160×120, 5fps, 600 frames):**
+
+Noisy surveillance (sensor noise ~10 DN):
+- PLTV q=30: 1.5MB (22.8:1) — beats H.264 crf=23 (2.9MB, 11.7:1) by 2×
+- PLTV q=50: 544KB (63.5:1) — beats H.264 by 5.4×
+
+Clean synthetic (no noise):
+- PLTV: 440KB (78:1) — H.264 wins at 1874:1 (ideal for block matching)
+
+**Key insight:** Sensor noise defeats H.264's motion estimation (it sees "motion"
+that's actually noise). PLTV's quality threshold absorbs the noise, making static
+regions collapse to CONST regardless of noise level.
