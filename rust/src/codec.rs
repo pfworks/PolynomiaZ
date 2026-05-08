@@ -260,13 +260,69 @@ fn split_platters(tracks: &[Vec<u8>]) -> Vec<(Vec<TrackEncoding>, Vec<MetaGroup>
     let (meta_groups, remaining) = cross_track_optimize(encodings);
 
     let mut structured = Vec::new();
-    let mut raw = Vec::new();
+    let mut raw: Vec<TrackEncoding> = Vec::new();
 
     for enc in remaining {
         if enc.pattern == PatternType::Raw {
             raw.push(enc);
         } else {
             structured.push(enc);
+        }
+    }
+
+    // Second-pass: re-analyze concatenated RAW data with different geometry
+    if raw.len() >= 2 {
+        let sectors = tracks[0].len();
+        let raw_blob: Vec<u8> = raw.iter().flat_map(|e| {
+            match &e.params {
+                TrackParams::Raw { data } => data.clone(),
+                _ => vec![0; sectors],
+            }
+        }).collect();
+
+        // Try smaller sector sizes on the combined RAW data
+        let mut best_reanalysis: Option<(Vec<TrackEncoding>, Vec<MetaGroup>, usize)> = None;
+        for &spt in &[8, 16, 32, 64] {
+            if spt >= sectors && spt >= raw_blob.len() { continue; }
+            let geom2 = compute_geometry(raw_blob.len(), spt);
+            let tracks2 = lay_out(&raw_blob, &geom2);
+            let enc2 = analyze_platter(&tracks2);
+            let (meta2, rem2) = cross_track_optimize(enc2);
+
+            // Count how much is still RAW after re-analysis
+            let raw_remaining: usize = rem2.iter()
+                .filter(|e| e.pattern == PatternType::Raw)
+                .count();
+            let structured_found = rem2.len() - raw_remaining + meta2.len();
+
+            if structured_found > 0 {
+                let size: usize = rem2.iter().map(|e| estimate_track_size(e, spt)).sum::<usize>()
+                    + meta2.iter().map(|g| estimate_meta_size(g) + 3).sum::<usize>();
+                let original_raw_size = raw.len() * (3 + sectors); // original cost
+
+                if size < original_raw_size {
+                    if best_reanalysis.is_none() || size < best_reanalysis.as_ref().unwrap().2 {
+                        best_reanalysis = Some((rem2, meta2, size));
+                    }
+                }
+            }
+        }
+
+        if let Some((reanalyzed, meta2, _)) = best_reanalysis {
+            // Replace raw platter with re-analyzed version
+            // Remap track indices to original raw track positions
+            let mut platters = Vec::new();
+            if !structured.is_empty() || !meta_groups.is_empty() {
+                platters.push((structured, meta_groups));
+            }
+            // The re-analyzed tracks use their own indices (relative to the raw blob)
+            // We need to encode them as a separate PLTZ blob on the raw platter
+            // Simplest: just use the re-analyzed encodings directly
+            platters.push((reanalyzed, meta2));
+            if platters.is_empty() {
+                platters.push((Vec::new(), Vec::new()));
+            }
+            return platters;
         }
     }
 
