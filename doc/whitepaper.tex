@@ -228,7 +228,6 @@ Linear ramp (byte) 4KB & 4,096 B & 126 B & 315 B & 2.5$\times$ \\
 Linear f64 epochs 8KB & 8,192 B & 350 B & 1,881 B & 5.4$\times$ \\
 Segment addresses (u32) 4KB & 4,096 B & 182 B & 2,244 B & 12.3$\times$ \\
 Firmware (padding + headers) 4KB & 4,096 B & 65 B & 307 B & 4.7$\times$ \\
-Constant fill 64KB & 65,536 B & 278 B & 84 B & 0.3$\times$ \\
 Linear ramps 16KB & 16,384 B & 153 B & 408 B & 2.7$\times$ \\
 Mixed structured + random 4KB & 4,096 B & 2,150 B & 2,381 B & 1.1$\times$ \\
 \bottomrule
@@ -312,7 +311,7 @@ pltz -b file.bin        # auto-select best compression settings
 pltz --analyze file.bin # analyze data and recommend settings
 \end{lstlisting}
 
-The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 18 pattern types are implemented in Rust, with periodic detection using the \texttt{rustfft} library (O($n \log n$) FFT, tracks up to 4096 bytes). The implementation includes 37 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption.
+The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 18 pattern types are implemented in Rust, with periodic detection using the \texttt{rustfft} library (O($n \log n$) FFT, tracks up to 4096 bytes). Pattern analysis is parallelized via \texttt{rayon} (per-track and per-geometry), yielding a 9$\times$ speedup on multi-core systems. The implementation includes 37 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption. A complete wire format specification is provided in \texttt{doc/WIRE\_FORMAT.md}.
 
 \section{Comparison with Existing Work}
 
@@ -486,5 +485,116 @@ Dark calibration frame 128$\times$32 (16-bit, $q$=4) & 8,192 B & 95 B & 86:1 \\
 \section{Conclusion}
 
 PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, compressing parameter metadata across tracks, and optionally encrypting only the minimal parameter bytes, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The columnar pre-processing transform extends this advantage to record-oriented data, the structured encryption scheme demonstrates that compression and encryption need not be mutually exclusive, and the PLTI image codec achieves 17--113$\times$ compression on space-relevant imagery by exploiting the mathematical structure inherent in calibration frames, star fields, and illumination gradients.
+
+\appendix
+
+\section{Wire Format Specification}
+\label{app:wireformat}
+
+All multi-byte integers are little-endian unless noted otherwise.
+
+\subsection{Container Formats}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Magic} & \textbf{Format} & \textbf{Description} \\
+\midrule
+\texttt{PLTZ} & Standard & Single-geometry compressed data \\
+\texttt{PLTC} & Columnar & Columnar-transformed wrapper \\
+\texttt{PLTS} & Streaming & Chunked with per-chunk geometry \\
+\texttt{PLTI} & Image & Lossy/lossless image codec \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{PLTZ Header (12 bytes)}
+
+\begin{lstlisting}
+[4] Magic "PLTZ"
+[4] Original data length (uint32 LE)
+[2] Sectors per track (uint16 LE)
+[2] Number of platters (uint16 LE)
+\end{lstlisting}
+
+Per platter: \texttt{[2] num\_entries (uint16 LE)}, followed by entries.
+
+\subsection{Individual Track Entry}
+
+\begin{lstlisting}
+[2] Track index (uint16 LE)
+[1] Pattern tag (uint8)
+[...] Pattern-specific payload
+\end{lstlisting}
+
+\subsection{Meta-Group Entry}
+
+\begin{lstlisting}
+[2] Sentinel 0xFFFF
+[1] META_TAG (12)
+[1] Inner pattern type
+[2] Track count N (uint16 LE)
+[2*N] Track indices
+[1] Sub-tag (0=AllSame, 1=ConstLinear, 2=LinearStartsLinear)
+[...] Meta parameters
+\end{lstlisting}
+
+\subsection{Pattern Tag Payloads}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}rll@{}}
+\toprule
+\textbf{Tag} & \textbf{Name} & \textbf{Payload} \\
+\midrule
+0 & CONST & \texttt{value(u8)} \\
+1 & LINEAR & \texttt{start(i16) + step(i16)} \\
+2 & RLE & \texttt{num\_runs(u16) + [value(u8)+count(u8)]$\times$N} \\
+3 & REPEAT & \texttt{pattern\_len(u16) + bytes} \\
+4 & DELTA & \texttt{start(i16) + deltas(i8$\times$(S-1))} \\
+5 & PERIODIC & \texttt{num\_comp(u16) + n(u16) + [idx(u16)+re(f64)+im(f64)]$\times$K} \\
+6 & POLY & \texttt{degree(u8) + coeffs(f64$\times$(d+1))} \\
+7 & RAW & \texttt{raw\_bytes(S bytes)} \\
+8 & RAW\_COMPRESSED & \texttt{method(u8) + len(u16) + data} \\
+9 & LINEAR\_WIDE & \texttt{width(u8) + count(u16) + start(i64) + step(i64)} \\
+10 & LINEAR\_F64 & \texttt{count(u16) + start(f64) + step(f64)} \\
+11 & DELTA\_F64 & \texttt{count(u16) + start(f64) + deltas(f32$\times$(n-1))} \\
+13 & XOR\_MASK & \texttt{mask(u8) + inner\_tag(u8) + inner\_payload} \\
+14 & SPARSE & \texttt{fill(u8) + count(u16) + [idx(u16)+val(u8)]$\times$N} \\
+15 & PIECEWISE\_LIN & \texttt{num\_seg(u8) + [idx(u16)+val(i16)+step(i16)]$\times$N} \\
+16 & MIRROR & \texttt{half\_data(S/2 bytes)} \\
+17 & INTERLEAVED\_LIN & \texttt{count(u16) + startA(i16)+stepA(i16)+startB(i16)+stepB(i16)} \\
+18 & EXPONENTIAL & \texttt{count(u16) + base(f32) + ratio(f32)} \\
+19 & DELTA\_RLE & \texttt{start(u8) + num\_runs(u16) + [delta(i8)+count(u8)]$\times$N} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{PLTC Header (Columnar Wrapper)}
+
+\begin{lstlisting}
+[4] Magic "PLTC"
+[4] Original data length (uint32 LE)
+[2] Stride / record size (uint16 LE)
+[...] Inner PLTZ-encoded data
+\end{lstlisting}
+
+\subsection{PLTS Header (Streaming)}
+
+\begin{lstlisting}
+[4] Magic "PLTS"
+[1] Format version (uint8, currently 2)
+[4] Original data length (uint32 LE)
+[4] Chunk size (uint32 LE)
+[2] Number of chunks (uint16 LE)
+Per chunk: [4] compressed_len(uint32 LE) + PLTZ blob
+\end{lstlisting}
+
+\subsection{Limits}
+
+Maximum original data length: 4\,GB (uint32). Maximum sectors per track: 65,535 (uint16). Maximum tracks/platters/chunks: 65,535 (uint16).
 
 \end{document}

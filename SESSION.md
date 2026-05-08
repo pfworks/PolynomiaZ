@@ -205,6 +205,8 @@ Per platter:
 - [x] Image codec (PLTI) for space/surveillance cameras
 - [x] `--analyze` flag (recommends optimal settings)
 - [x] `-b/--best` flag (auto-selects best compression)
+- [x] Parallel processing (rayon — 9× speedup on test suite)
+- [x] Wire format specification (`doc/WIRE_FORMAT.md`)
 
 ### Columnar Pre-Processing
 

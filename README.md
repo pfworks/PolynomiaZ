@@ -188,6 +188,9 @@ Per platter:
 - [x] Per-section geometry (chunked mode, each chunk gets optimal geometry)
 - [x] Streaming/chunked encoding (`pltz -C 64k` or `pltz -C auto`)
 - [x] File format versioning (PLTS v2 header)
+- [x] Parallel processing (rayon — 9× speedup)
+- [x] Wire format specification (`doc/WIRE_FORMAT.md`)
+- [x] Auto-optimization (`pltz -b`, `pltz --analyze`)
 
 ### Future Investigation: Alternative Geometries
 
