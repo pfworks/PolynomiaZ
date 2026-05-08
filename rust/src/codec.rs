@@ -359,6 +359,7 @@ fn estimate_track_size(enc: &TrackEncoding, sectors: usize) -> usize {
         TrackParams::InterleavedLinear { .. } => 10,
         TrackParams::Exponential { .. } => 10,
         TrackParams::DeltaRle { runs, .. } => 3 + runs.len() * 2,
+        TrackParams::BitPacked { packed, .. } => 1 + packed.len(),
     }
 }
 
@@ -498,6 +499,12 @@ fn encode_track(buf: &mut Vec<u8>, enc: &TrackEncoding, _sectors: usize, raw_com
                 buf.push(delta as u8);
                 buf.push(count);
             }
+        }
+        TrackParams::BitPacked { bits, packed } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::BitPacked as u8);
+            buf.push(*bits);
+            buf.extend_from_slice(packed);
         }
         TrackParams::Raw { data } => {
             if raw_comp == RawCompressor::Zlib {
@@ -758,6 +765,27 @@ fn decode_track(buf: &[u8], offset: usize, sectors: usize) -> Result<(u16, Vec<u
                 }
             }
             track.truncate(sectors);
+            track
+        }
+        PatternType::BitPacked => {
+            let bits = buf[pos] as usize; pos += 1;
+            let packed_len = (sectors * bits + 7) / 8;
+            let packed = &buf[pos..pos + packed_len];
+            pos += packed_len;
+            let mut track = Vec::with_capacity(sectors);
+            let mut bit_pos: usize = 0;
+            for _ in 0..sectors {
+                let mut val: u8 = 0;
+                for _ in 0..bits {
+                    if packed[bit_pos / 8] & (1 << (7 - (bit_pos % 8))) != 0 {
+                        val = (val << 1) | 1;
+                    } else {
+                        val <<= 1;
+                    }
+                    bit_pos += 1;
+                }
+                track.push(val);
+            }
             track
         }
         PatternType::Raw => {

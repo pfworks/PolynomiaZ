@@ -238,6 +238,7 @@ fn estimate_params_size(params: &TrackParams) -> usize {
         TrackParams::InterleavedLinear { .. } => 10,
         TrackParams::Exponential { .. } => 10,
         TrackParams::DeltaRle { runs, .. } => 3 + runs.len() * 2,
+        TrackParams::BitPacked { packed, .. } => 1 + packed.len(),
     }
 }
 

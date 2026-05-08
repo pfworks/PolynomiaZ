@@ -23,6 +23,7 @@ pub enum PatternType {
     InterleavedLinear = 17,
     Exponential = 18,
     DeltaRle = 19,
+    BitPacked = 20,
 }
 
 impl PatternType {
@@ -47,6 +48,7 @@ impl PatternType {
             17 => Some(Self::InterleavedLinear),
             18 => Some(Self::Exponential),
             19 => Some(Self::DeltaRle),
+            20 => Some(Self::BitPacked),
             _ => None,
         }
     }
@@ -79,6 +81,8 @@ pub enum TrackParams {
     Exponential { count: u16, base: f32, ratio: f32 },
     /// Delta-RLE: deltas between values are run-length encoded
     DeltaRle { start: u8, runs: Vec<(i8, u8)> },
+    /// BitPacked: all values fit in fewer than 8 bits, stored packed
+    BitPacked { bits: u8, packed: Vec<u8> },
 }
 
 #[derive(Debug, Clone)]
@@ -743,6 +747,40 @@ fn detect_delta_rle(track: &[u8]) -> Option<TrackParams> {
     }
 }
 
+/// BitPacked: if all values fit in fewer than 8 bits, pack them tightly.
+fn detect_bit_packed(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    let max_val = *track.iter().max().unwrap();
+
+    // Determine minimum bits needed
+    let bits = if max_val == 0 { 1 }
+        else { 8 - max_val.leading_zeros() as u8 };
+
+    // Only worth it if we save at least 25% (bits <= 6)
+    if bits >= 7 { return None; }
+
+    // Pack values: bits per value, MSB first
+    let packed_len = (n * bits as usize + 7) / 8;
+    let cost = 1 + packed_len; // 1 byte for bits + packed data
+
+    if cost >= n { return None; }
+
+    let mut packed = vec![0u8; packed_len];
+    let mut bit_pos: usize = 0;
+    for &val in track {
+        for b in (0..bits).rev() {
+            if val & (1 << b) != 0 {
+                packed[bit_pos / 8] |= 1 << (7 - (bit_pos % 8));
+            }
+            bit_pos += 1;
+        }
+    }
+
+    Some(TrackParams::BitPacked { bits, packed })
+}
+
 pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_const(track) {
         return TrackEncoding { pattern: PatternType::Const, params, track_idx };
@@ -781,6 +819,9 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     }
     if let Some(params) = detect_delta_f64(track) {
         return TrackEncoding { pattern: PatternType::DeltaF64, params, track_idx };
+    }
+    if let Some(params) = detect_bit_packed(track) {
+        return TrackEncoding { pattern: PatternType::BitPacked, params, track_idx };
     }
     if let Some(params) = detect_delta(track) {
         return TrackEncoding { pattern: PatternType::Delta, params, track_idx };

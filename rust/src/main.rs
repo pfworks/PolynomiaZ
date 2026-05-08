@@ -375,6 +375,7 @@ fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
             PatternType::InterleavedLinear => "INTERLEAVED_LINEAR",
             PatternType::Exponential => "EXPONENTIAL",
             PatternType::DeltaRle => "DELTA_RLE",
+            PatternType::BitPacked => "BIT_PACKED",
             PatternType::Raw | PatternType::RawCompressed => "RAW",
         };
         *counts.entry(name).or_insert(0) += 1;
