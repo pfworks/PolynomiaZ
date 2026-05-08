@@ -5,3 +5,4 @@ pub mod cross_track;
 pub mod columnar;
 pub mod encrypt;
 pub mod image;
+pub mod video;
