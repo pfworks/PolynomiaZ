@@ -215,14 +215,64 @@ fn output_path_decompress(path: &str) -> Result<String, String> {
     }
 }
 
+/// Detect likely record strides by finding periodicities in the byte stream.
+/// Looks for repeating byte values at regular intervals (e.g., null terminators,
+/// sync bytes, constant fields).
+fn detect_strides(data: &[u8]) -> Vec<usize> {
+    let mut candidates: Vec<usize> = Vec::new();
+    let max_stride = std::cmp::min(1024, data.len() / 4);
+    if max_stride < 2 { return candidates; }
+
+    // Method 1: Autocorrelation of byte equality
+    // For each candidate stride, count how many positions have data[i] == data[i+stride]
+    let sample_len = std::cmp::min(data.len(), 4096);
+    let mut best_scores: Vec<(usize, f64)> = Vec::new();
+
+    for stride in 2..=max_stride {
+        let mut matches = 0usize;
+        let comparisons = sample_len - stride;
+        if comparisons == 0 { continue; }
+        for i in 0..comparisons {
+            if data[i] == data[i + stride] {
+                matches += 1;
+            }
+        }
+        let score = matches as f64 / comparisons as f64;
+        // A good stride has high autocorrelation (>0.5 means >50% of bytes repeat)
+        if score > 0.4 {
+            best_scores.push((stride, score));
+        }
+    }
+
+    // Sort by score descending, take top candidates
+    best_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+    // Take the top 5 unique strides (and their multiples/divisors)
+    for &(stride, _) in best_scores.iter().take(8) {
+        if !candidates.contains(&stride) {
+            candidates.push(stride);
+        }
+    }
+
+    // Method 2: Look for common struct sizes (powers of 2, common record sizes)
+    for &s in &[4, 8, 12, 16, 20, 24, 32, 48, 64, 128, 256, 512] {
+        if s < max_stride && !candidates.contains(&s) {
+            candidates.push(s);
+        }
+    }
+
+    candidates
+}
+
 fn find_best_compression(data: &[u8]) -> Vec<u8> {
     use pltz::codec::RawCompressor;
 
     let raw_comp = RawCompressor::Zlib;
     let mut best = pltz::codec::encode(data, raw_comp);
 
-    // Try columnar strides
-    for &stride in &[4, 8, 12, 16, 20, 21, 24, 32, 48, 64, 128, 256, 512] {
+    // Auto-detect strides + try them
+    let strides = detect_strides(data);
+    for stride in strides {
         if stride >= data.len() || stride < 2 { continue; }
         let transformed = pltz::columnar::columnar_transform(data, stride);
         let inner = pltz::codec::encode(&transformed, raw_comp);
@@ -263,9 +313,11 @@ fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
     let plain = pltz::codec::encode(data, RawCompressor::Zlib);
     eprintln!("  Default:          {} bytes (ratio {:.3})", plain.len(), plain.len() as f64 / data.len() as f64);
 
-    // 2. Try various strides for columnar
+    // 2. Try auto-detected strides for columnar
+    let strides = detect_strides(data);
     let mut best_stride: Option<(usize, usize)> = None;
-    for &stride in &[4, 8, 12, 16, 20, 21, 24, 32, 48, 64, 128, 256, 512] {
+    for stride in &strides {
+        let stride = *stride;
         if stride >= data.len() || stride < 2 { continue; }
         let transformed = pltz::columnar::columnar_transform(data, stride);
         let compressed = pltz::codec::encode(&transformed, RawCompressor::Zlib);
