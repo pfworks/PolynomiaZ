@@ -4,12 +4,25 @@ use pltz::platter::*;
 use pltz::analyzer::*;
 
 pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
-    let geom = compute_geometry(data.len(), 256);
-    let tracks = lay_out(data, &geom);
+    // Use adaptive geometry (same as encoder)
+    let mut best_geom = compute_geometry(data.len(), 256);
+    let mut best_raw = usize::MAX;
+    for &spt in SECTOR_CANDIDATES {
+        let geom = compute_geometry(data.len(), spt);
+        let tracks = lay_out(data, &geom);
+        let encodings = analyze_platter(&tracks);
+        let raw_count = encodings.iter().filter(|e| e.pattern == PatternType::Raw).count();
+        if raw_count < best_raw {
+            best_raw = raw_count;
+            best_geom = geom;
+        }
+    }
+
+    let tracks = lay_out(data, &best_geom);
     let encodings = analyze_platter(&tracks);
 
     let num_tracks = encodings.len();
-    let spt = geom.sectors_per_track;
+    let spt = best_geom.sectors_per_track;
 
     let cx = 300.0f64;
     let cy = 300.0f64;
