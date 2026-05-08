@@ -7,7 +7,7 @@ use crate::platter::*;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
-use std::io::{Read, Write};
+use std::io::{Read, Write, Cursor};
 
 const MAGIC: &[u8; 4] = b"PLTZ";
 const MAGIC_COLUMNAR: &[u8; 4] = b"PLTC"; // Columnar-transformed variant
@@ -16,7 +16,10 @@ const FORMAT_VERSION: u8 = 2; // v2: adds version byte, streaming support
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawCompressor {
     None,
-    Zlib,
+    Zlib,    // method 1 — fast, decent ratio
+    Zstd,    // method 2 — fast, better ratio
+    Brotli,  // method 3 — slower, best ratio
+    Best,    // try all, pick smallest
 }
 
 /// Encode with optional columnar pre-processing.
@@ -512,12 +515,12 @@ fn encode_track(buf: &mut Vec<u8>, enc: &TrackEncoding, _sectors: usize, raw_com
             buf.extend_from_slice(packed);
         }
         TrackParams::Raw { data } => {
-            if raw_comp == RawCompressor::Zlib {
-                if let Some(compressed) = deflate_compress(data) {
+            if raw_comp != RawCompressor::None {
+                if let Some((method, compressed)) = compress_raw_best(data, raw_comp) {
                     if compressed.len() < data.len() {
                         buf.extend_from_slice(&enc.track_idx.to_le_bytes());
                         buf.push(PatternType::RawCompressed as u8);
-                        buf.push(1); // method: deflate
+                        buf.push(method);
                         buf.extend_from_slice(&(compressed.len() as u16).to_le_bytes());
                         buf.extend_from_slice(&compressed);
                         return;
@@ -799,12 +802,12 @@ fn decode_track(buf: &[u8], offset: usize, sectors: usize) -> Result<(u16, Vec<u
             track
         }
         PatternType::RawCompressed => {
-            let _method = buf[pos]; pos += 1;
+            let method = buf[pos]; pos += 1;
             let comp_len = u16::from_le_bytes(buf[pos..pos + 2].try_into().unwrap()) as usize;
             pos += 2;
             let compressed = &buf[pos..pos + comp_len];
             pos += comp_len;
-            deflate_decompress(compressed)?
+            raw_decompress(compressed, method)?
         }
     };
 
@@ -817,11 +820,65 @@ fn deflate_compress(data: &[u8]) -> Option<Vec<u8>> {
     encoder.finish().ok()
 }
 
+fn zstd_compress(data: &[u8]) -> Option<Vec<u8>> {
+    zstd::encode_all(std::io::Cursor::new(data), 19).ok()
+}
+
+fn brotli_compress(data: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut writer = brotli::CompressorWriter::new(&mut out, 4096, 11, 22);
+    writer.write_all(data).ok()?;
+    drop(writer);
+    Some(out)
+}
+
+/// Try compressing with the specified method(s), return (method_tag, compressed_data).
+fn compress_raw_best(data: &[u8], mode: RawCompressor) -> Option<(u8, Vec<u8>)> {
+    match mode {
+        RawCompressor::None => None,
+        RawCompressor::Zlib => deflate_compress(data).map(|c| (1u8, c)),
+        RawCompressor::Zstd => zstd_compress(data).map(|c| (2u8, c)),
+        RawCompressor::Brotli => brotli_compress(data).map(|c| (3u8, c)),
+        RawCompressor::Best => {
+            // Try all three, pick smallest
+            let mut best: Option<(u8, Vec<u8>)> = None;
+            if let Some(c) = deflate_compress(data) {
+                best = Some((1, c));
+            }
+            if let Some(c) = zstd_compress(data) {
+                if best.is_none() || c.len() < best.as_ref().unwrap().1.len() {
+                    best = Some((2, c));
+                }
+            }
+            if let Some(c) = brotli_compress(data) {
+                if best.is_none() || c.len() < best.as_ref().unwrap().1.len() {
+                    best = Some((3, c));
+                }
+            }
+            best
+        }
+    }
+}
+
 fn deflate_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     let mut decoder = DeflateDecoder::new(data);
     let mut out = Vec::new();
     decoder.read_to_end(&mut out).map_err(|e| format!("Deflate error: {}", e))?;
     Ok(out)
+}
+
+fn raw_decompress(data: &[u8], method: u8) -> Result<Vec<u8>, String> {
+    match method {
+        1 => deflate_decompress(data),
+        2 => zstd::decode_all(std::io::Cursor::new(data)).map_err(|e| format!("Zstd error: {}", e)),
+        3 => {
+            let mut out = Vec::new();
+            let mut reader = brotli::Decompressor::new(data, 4096);
+            reader.read_to_end(&mut out).map_err(|e| format!("Brotli error: {}", e))?;
+            Ok(out)
+        }
+        _ => Err(format!("Unknown raw compression method: {}", method)),
+    }
 }
 
 fn irfft(real: &[f64], imag: &[f64], n: usize) -> Vec<u8> {

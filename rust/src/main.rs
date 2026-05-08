@@ -30,9 +30,13 @@ struct Cli {
     #[arg(short, long)]
     force: bool,
 
-    /// Skip deflate on raw tracks (no zlib dep; decompress auto-detects)
+    /// Skip compression on raw tracks (fastest; decompress auto-detects)
     #[arg(long = "no-zlib")]
     no_zlib: bool,
+
+    /// Raw track compressor: fast (zlib), good (zstd), best (try all). Default: best
+    #[arg(long, default_value = "best")]
+    raw: String,
 
     /// Record size for columnar pre-processing (e.g. 21, 1k).
     /// Transposes data so each byte-position across records is contiguous.
@@ -163,7 +167,18 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
         }
     } else {
         // Compress
-        let raw_comp = if cli.no_zlib { RawCompressor::None } else { RawCompressor::Zlib };
+        let raw_comp = if cli.no_zlib {
+            RawCompressor::None
+        } else {
+            match cli.raw.as_str() {
+                "none" => RawCompressor::None,
+                "fast" | "zlib" => RawCompressor::Zlib,
+                "good" | "zstd" => RawCompressor::Zstd,
+                "brotli" => RawCompressor::Brotli,
+                "best" => RawCompressor::Best,
+                _ => RawCompressor::Best,
+            }
+        };
         let compressed = if cli.best {
             find_best_compression(&input_data)
         } else if let Some(ref cs) = cli.chunk_size {
@@ -277,7 +292,7 @@ fn detect_strides(data: &[u8]) -> Vec<usize> {
 fn find_best_compression(data: &[u8]) -> Vec<u8> {
     use pltz::codec::RawCompressor;
 
-    let raw_comp = RawCompressor::Zlib;
+    let raw_comp = RawCompressor::Best;
     let mut best = pltz::codec::encode(data, raw_comp);
 
     // Auto-detect strides + try them
