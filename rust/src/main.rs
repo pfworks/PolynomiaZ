@@ -4,6 +4,8 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::process;
 
+mod visualize;
+
 /// Polar coordinate compression. Works like bzip2:
 ///   pltz file          — compress file → file.pltz (removes original)
 ///   pltz -d file.pltz  — decompress file.pltz → file (removes compressed)
@@ -48,6 +50,10 @@ struct Cli {
     /// Analyze data and recommend optimal settings
     #[arg(long)]
     analyze: bool,
+
+    /// Output SVG visualization of disk layout
+    #[arg(long)]
+    visualize: bool,
 
     /// Auto-select best compression settings
     #[arg(short = 'b', long)]
@@ -121,6 +127,10 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
 
     if cli.analyze {
         return analyze_data(path, &input_data);
+    }
+
+    if cli.visualize {
+        return visualize::visualize_data(path, &input_data);
     }
 
     if decompress || cli.test {
