@@ -195,7 +195,7 @@ Per platter:
 - [x] Cross-track meta-descriptors
 - [x] Adaptive sector sizing (7 geometries)
 - [x] Multi-platter splitting
-- [x] Configurable deflate fallback (on by default, `--no-zlib` to disable)
+- [x] Configurable raw fallback (zlib/zstd/brotli; `--raw best` default, `--no-zlib` to disable)
 - [x] Technical whitepaper
 - [x] Columnar pre-processing (`pltz -r <stride>`)
 - [x] Structured encryption (demo — NOT production-ready)

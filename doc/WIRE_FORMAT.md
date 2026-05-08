@@ -96,6 +96,10 @@ Offset  Size  Field
 | Method | Algorithm |
 |--------|-----------|
 | 1 | DEFLATE (RFC 1951) |
+| 2 | Zstandard (RFC 8878) |
+| 3 | Brotli (RFC 7932) |
+
+Default (`--raw best`): tries all three, stores whichever is smallest. Decoder auto-detects from method byte.
 
 ---
 

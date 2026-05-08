@@ -84,7 +84,10 @@ pltz file.bin           # compress → file.bin.pltz (removes original)
 pltz -d file.bin.pltz   # decompress → file.bin (removes compressed)
 pltz -k file.bin        # compress, keep original
 pltz -c file.bin        # compress to stdout
-pltz --no-zlib file.bin # skip deflate on raw tracks (no zlib dep)
+pltz --no-zlib file.bin # skip all raw compression (fastest)
+pltz --raw fast file.bin # zlib only (fast)
+pltz --raw good file.bin # zstd (better ratio)
+pltz --raw best file.bin # try zlib+zstd+brotli, pick smallest (default)
 pltz -t file.bin.pltz   # test integrity
 pltz -v file.bin        # verbose output
 pltz -r 21 file.bin     # columnar pre-processing (stride=21 bytes)
@@ -180,7 +183,7 @@ Per platter:
 - [x] Binary format (12-byte header + compact track encoding)
 - [x] Adaptive sector sizing (7 geometries)
 - [x] Multi-platter splitting (structured vs raw)
-- [x] Configurable raw fallback compressor (deflate on by default, `--no-zlib` to disable)
+- [x] Configurable raw fallback compressor (zlib/zstd/brotli, default: try all pick best)
 - [x] Wide-word analysis (16/32-bit integers, f64 doubles)
 - [x] Cross-track meta-descriptors
 - [x] bzip2-style CLI

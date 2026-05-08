@@ -302,7 +302,10 @@ The primary implementation is written in Rust with a bzip2-style command-line in
 pltz file.bin           # compress -> file.bin.pltz
 pltz -d file.bin.pltz   # decompress -> file.bin
 pltz -k file.bin        # keep original
-pltz --no-zlib file.bin # skip deflate on raw tracks (no zlib dep)
+pltz --no-zlib file.bin # skip all raw compression (fastest)
+pltz --raw fast file.bin # zlib only (fast)
+pltz --raw good file.bin # zstd (better ratio)
+pltz --raw best file.bin # try zlib+zstd+brotli, pick smallest (default)
 pltz -c file.bin        # output to stdout (pipeable)
 pltz -t file.bin.pltz   # test integrity
 pltz -r 21 file.bin     # columnar: input has 21-byte records
