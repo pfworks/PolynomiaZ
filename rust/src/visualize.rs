@@ -63,15 +63,15 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
     let raw: Vec<&TrackEncoding> = encodings.iter().filter(|e| e.pattern == PatternType::Raw || e.pattern == PatternType::RawCompressed).collect();
     let has_two_platters = !structured.is_empty() && !raw.is_empty();
 
-    let img_width = if has_two_platters { 1100 } else { 750 };
+    let img_width = if has_two_platters { 1300 } else { 750 };
     let mut svg = String::new();
     svg.push_str(&format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"620\" viewBox=\"0 0 {} 620\">\n", img_width, img_width));
     svg.push_str("<rect width=\"100%\" height=\"100%\" fill=\"#1a1a2e\"/>\n");
 
     // Helper to draw a platter
     let draw_platter = |svg: &mut String, cx: f64, cy: f64, tracks_to_draw: &[&TrackEncoding], label: &str| {
-        let r_min = 60.0f64;
-        let r_max = 250.0f64;
+        let r_min = 50.0f64;
+        let r_max = 200.0f64;
         let n = tracks_to_draw.len();
         let tw = if n > 0 { (r_max - r_min) / n as f64 } else { 10.0 };
 
@@ -103,12 +103,12 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
 
     if has_two_platters {
         // Platter 0 (structured) on left
-        svg.push_str("<text x=\"270\" y=\"580\" text-anchor=\"middle\" fill=\"#aaa\" font-size=\"12\" font-family=\"monospace\">Platter 0 (Structured)</text>\n");
-        draw_platter(&mut svg, 270.0, 310.0, &structured, "Platter 0");
+        svg.push_str("<text x=\"240\" y=\"580\" text-anchor=\"middle\" fill=\"#aaa\" font-size=\"12\" font-family=\"monospace\">Platter 0 (Structured)</text>\n");
+        draw_platter(&mut svg, 240.0, 310.0, &structured, "Platter 0");
 
         // Platter 1 (raw) on right
-        svg.push_str("<text x=\"680\" y=\"580\" text-anchor=\"middle\" fill=\"#aaa\" font-size=\"12\" font-family=\"monospace\">Platter 1 (Raw)</text>\n");
-        draw_platter(&mut svg, 680.0, 310.0, &raw, "Platter 1");
+        svg.push_str("<text x=\"700\" y=\"580\" text-anchor=\"middle\" fill=\"#aaa\" font-size=\"12\" font-family=\"monospace\">Platter 1 (Raw)</text>\n");
+        draw_platter(&mut svg, 700.0, 310.0, &raw, "Platter 1");
     } else {
         let all: Vec<&TrackEncoding> = encodings.iter().collect();
         draw_platter(&mut svg, 300.0, 310.0, &all, &subtitle);
@@ -120,7 +120,7 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
         if !seen.contains(&enc.pattern) { seen.push(enc.pattern); }
     }
 
-    let legend_x = if has_two_platters { 950 } else { 620 };
+    let legend_x = if has_two_platters { 1050 } else { 620 };
     let mut legend_y = 50;
     svg.push_str(&format!(
         "<text x=\"{}\" y=\"{}\" fill=\"white\" font-size=\"13\" font-family=\"monospace\" font-weight=\"bold\">Legend</text>\n",
@@ -143,7 +143,7 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
     }
 
     // Title
-    let title_x = if has_two_platters { 550 } else { 300 };
+    let title_x = if has_two_platters { 650 } else { 300 };
     svg.push_str(&format!(
         "<text x=\"{}\" y=\"20\" text-anchor=\"middle\" fill=\"white\" font-size=\"14\" font-family=\"monospace\">{} \u{2014} {} bytes ({})</text>\n",
         title_x, path, data.len(), subtitle
