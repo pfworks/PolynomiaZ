@@ -595,6 +595,6 @@ Per chunk: [4] compressed_len(uint32 LE) + PLTZ blob
 
 \subsection{Limits}
 
-Maximum original data length: 4\,GB (uint32). Maximum sectors per track: 65,535 (uint16). Maximum tracks/platters/chunks: 65,535 (uint16).
+Maximum original data length per PLTZ blob: 4\,GB (uint32). Files exceeding 4\,GB automatically use PLTS chunked mode (64\,MB chunks), giving an effectively unlimited maximum file size. Maximum sectors per track: 65,535 (uint16). Maximum tracks/platters/chunks: 65,535 (uint16).
 
 \end{document}

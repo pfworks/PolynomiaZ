@@ -224,9 +224,10 @@ All integers are little-endian (LE) except:
 
 ## Limits
 
-- Maximum original data length: 4 GB (uint32)
+- Maximum original data length per PLTZ blob: 4 GB (uint32). Files >4GB automatically use PLTS chunked mode.
 - Maximum sectors per track: 65535 (uint16)
 - Maximum tracks per platter: 65535 (uint16, due to track index field)
 - Maximum platters: 65535 (uint16)
 - Maximum chunk count (PLTS): 65535 (uint16)
 - Maximum compressed chunk size: 4 GB (uint32)
+- **Effective maximum file size: unlimited** (via PLTS chunked mode, 64MB chunks)

@@ -207,6 +207,7 @@ Per platter:
 - [x] `-b/--best` flag (auto-selects best compression)
 - [x] Parallel processing (rayon — 9× speedup on test suite)
 - [x] Wire format specification (`doc/WIRE_FORMAT.md`)
+- [x] Auto-chunking for files >4GB (transparent, no user action needed)
 
 ### Columnar Pre-Processing
 
