@@ -292,37 +292,73 @@ fn detect_strides(data: &[u8]) -> Vec<usize> {
 fn find_best_compression(data: &[u8]) -> Vec<u8> {
     use pltz::codec::RawCompressor;
 
-    let raw_comp = RawCompressor::Best;
-    let mut best = pltz::codec::encode(data, raw_comp);
+    // Use fast compressor for search, then re-encode winner with best
+    let search_comp = RawCompressor::Zlib;
+    let final_comp = RawCompressor::Best;
+
+    eprint!("  [best] plain...");
+    let mut best = pltz::codec::encode(data, search_comp);
+    let mut best_mode: BestMode = BestMode::Plain;
+    eprintln!(" {}B", best.len());
 
     // Auto-detect strides + try them
     let strides = detect_strides(data);
     for stride in strides {
         if stride >= data.len() || stride < 2 { continue; }
+        eprint!("  [best] stride={}...", stride);
         let transformed = pltz::columnar::columnar_transform(data, stride);
-        let inner = pltz::codec::encode(&transformed, raw_comp);
+        let inner = pltz::codec::encode(&transformed, search_comp);
         let total_size = 10 + inner.len();
         if total_size < best.len() {
+            best_mode = BestMode::Columnar(stride);
+            // Build placeholder (will re-encode with final_comp)
             let mut buf = Vec::with_capacity(total_size);
             buf.extend_from_slice(b"PLTC");
             buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
             buf.extend_from_slice(&(stride as u16).to_le_bytes());
             buf.extend_from_slice(&inner);
             best = buf;
+            eprintln!(" {}B ★", total_size);
+        } else {
+            eprintln!(" {}B", total_size);
         }
     }
 
     // Try chunked
     for &chunk in &[4096, 8192, 16384, 32768, 65536] {
         if chunk >= data.len() { continue; }
-        let compressed = pltz::codec::encode_chunked(data, raw_comp, chunk);
+        eprint!("  [best] chunk={}k...", chunk/1024);
+        let compressed = pltz::codec::encode_chunked(data, search_comp, chunk);
         if compressed.len() < best.len() {
+            best_mode = BestMode::Chunked(chunk);
             best = compressed;
+            eprintln!(" {}B ★", best.len());
+        } else {
+            eprintln!(" {}B", compressed.len());
         }
     }
 
-    best
+    // Re-encode the winner with best raw compressor
+    eprint!("  [best] finalizing...");
+    let final_result = match best_mode {
+        BestMode::Plain => pltz::codec::encode(data, final_comp),
+        BestMode::Columnar(stride) => {
+            let transformed = pltz::columnar::columnar_transform(data, stride);
+            let inner = pltz::codec::encode(&transformed, final_comp);
+            let mut buf = Vec::with_capacity(10 + inner.len());
+            buf.extend_from_slice(b"PLTC");
+            buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            buf.extend_from_slice(&(stride as u16).to_le_bytes());
+            buf.extend_from_slice(&inner);
+            buf
+        }
+        BestMode::Chunked(chunk) => pltz::codec::encode_chunked(data, final_comp, chunk),
+    };
+    eprintln!(" {}B", final_result.len());
+    final_result
 }
+
+enum BestMode { Plain, Columnar(usize), Chunked(usize) }
 
 fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
     use pltz::codec::RawCompressor;
