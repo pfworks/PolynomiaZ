@@ -210,6 +210,10 @@ Per platter:
 - [x] Wire format specification (`doc/WIRE_FORMAT.md`)
 - [x] Auto-chunking for files >4GB (transparent, no user action needed)
 - [x] Smart stride auto-detection (byte-equality autocorrelation for `-b`/`--analyze`)
+- [x] Visualization (`pltz --visualize` → SVG platter diagram with legend)
+- [x] Video codec (PLTV — YCbCr 4:2:0, motion compensation, B-frames)
+- [x] Multiple raw fallback compressors (zlib/zstd/brotli, `--raw best` default)
+- [x] Verbose pattern breakdown (`-v` shows detected patterns)
 
 ### Columnar Pre-Processing
 

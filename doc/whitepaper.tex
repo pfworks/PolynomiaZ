@@ -508,6 +508,125 @@ PLTV wins on real-world noisy surveillance because sensor noise defeats H.264's 
 \item Higher-resolution video benchmarks and scene change detection
 \end{itemize}
 
+\section{Visualization}
+
+The \texttt{pltz --visualize} command generates SVG diagrams showing the disk platter layout with color-coded tracks. Figure~\ref{fig:uboot} shows a U-Boot SPL header (4KB) and Figure~\ref{fig:mixed} shows mixed structured/random data.
+
+\definecolor{cconst}{HTML}{4CAF50}
+\definecolor{clinear}{HTML}{2196F3}
+\definecolor{clinwide}{HTML}{3F51B5}
+\definecolor{crepeat}{HTML}{9C27B0}
+\definecolor{csparse}{HTML}{FFC107}
+\definecolor{cdelta}{HTML}{00BCD4}
+\definecolor{crawdefl}{HTML}{616161}
+\definecolor{crawraw}{HTML}{BDBDBD}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[scale=0.55]
+  % U-Boot SPL: Platter 0 — mostly CONST (green)
+  \node[font=\footnotesize] at (0,-5) {Platter 0 (Structured)};
+  % 53 CONST tracks (green rings)
+  \foreach \i in {1,...,53} {
+    \pgfmathsetmacro{\r}{4.2 - \i*0.06}
+    \draw[cconst, line width=1pt] (0,0) circle (\r cm);
+  }
+  % 8 LINEAR_WIDE tracks (blue)
+  \foreach \i in {54,...,61} {
+    \pgfmathsetmacro{\r}{4.2 - \i*0.06}
+    \draw[clinwide, line width=1pt] (0,0) circle (\r cm);
+  }
+  % 2 REPEAT tracks (purple)
+  \foreach \i in {62,63} {
+    \pgfmathsetmacro{\r}{4.2 - \i*0.06}
+    \draw[crepeat, line width=1pt] (0,0) circle (\r cm);
+  }
+  \fill[white] (0,0) circle (0.3);
+  \node[font=\tiny] at (0,0) {63};
+
+  % Platter 1 (raw) — 1 track
+  \begin{scope}[xshift=9cm]
+  \node[font=\footnotesize] at (0,-5) {Platter 1 (Raw)};
+  \draw[crawraw, line width=8pt] (0,0) circle (3cm);
+  \fill[white] (0,0) circle (0.3);
+  \node[font=\tiny] at (0,0) {1};
+  \end{scope}
+
+  % Legend
+  \begin{scope}[xshift=14cm, yshift=1cm]
+  \node[font=\small\bfseries, anchor=west] at (0,2.5) {U-Boot SPL (4KB)};
+  \fill[cconst] (0,1.6) rectangle (0.4,1.9); \node[font=\scriptsize, anchor=west] at (0.5,1.75) {CONST (53)};
+  \fill[clinwide] (0,0.9) rectangle (0.4,1.2); \node[font=\scriptsize, anchor=west] at (0.5,1.05) {LINEAR\_WIDE (8)};
+  \fill[crepeat] (0,0.2) rectangle (0.4,0.5); \node[font=\scriptsize, anchor=west] at (0.5,0.35) {REPEAT (2)};
+  \fill[crawraw] (0,-0.5) rectangle (0.4,-0.2); \node[font=\scriptsize, anchor=west] at (0.5,-0.35) {RAW (1)};
+  \node[font=\scriptsize, anchor=west] at (0,-1.2) {4096B $\rightarrow$ 410B (10:1)};
+  \end{scope}
+\end{tikzpicture}
+\caption{U-Boot SPL header: green rings are 0xFF padding (CONST), blue are vector/relocation tables (LINEAR\_WIDE), purple are repeating patterns. Only 1 of 64 tracks is unstructured.}
+\label{fig:uboot}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[scale=0.55]
+  % Mixed demo: Platter 0 — various patterns
+  \node[font=\footnotesize] at (0,-5) {Platter 0 (Structured)};
+  % 4 LINEAR (blue)
+  \foreach \i in {1,...,4} {
+    \pgfmathsetmacro{\r}{4.0 - \i*0.28}
+    \draw[clinear, line width=4pt] (0,0) circle (\r cm);
+  }
+  % 2 CONST (green)
+  \foreach \i in {5,6} {
+    \pgfmathsetmacro{\r}{4.0 - \i*0.28}
+    \draw[cconst, line width=4pt] (0,0) circle (\r cm);
+  }
+  % 2 REPEAT (purple)
+  \foreach \i in {7,8} {
+    \pgfmathsetmacro{\r}{4.0 - \i*0.28}
+    \draw[crepeat, line width=4pt] (0,0) circle (\r cm);
+  }
+  % 2 SPARSE (yellow)
+  \foreach \i in {9,10} {
+    \pgfmathsetmacro{\r}{4.0 - \i*0.28}
+    \draw[csparse, line width=4pt] (0,0) circle (\r cm);
+  }
+  % 2 LINEAR_WIDE (indigo)
+  \foreach \i in {11,12} {
+    \pgfmathsetmacro{\r}{4.0 - \i*0.28}
+    \draw[clinwide, line width=4pt] (0,0) circle (\r cm);
+  }
+  % 1 DELTA (cyan)
+  \draw[cdelta, line width=4pt] (0,0) circle (0.36cm);
+  \fill[white] (0,0) circle (0.15);
+
+  % Platter 1 (raw) — 4 tracks
+  \begin{scope}[xshift=9cm]
+  \node[font=\footnotesize] at (0,-5) {Platter 1 (Raw)};
+  \draw[crawraw, line width=10pt] (0,0) circle (3.2cm);
+  \draw[crawraw, line width=10pt] (0,0) circle (2.2cm);
+  \draw[crawdefl, line width=10pt] (0,0) circle (1.2cm);
+  \draw[crawdefl, line width=10pt] (0,0) circle (0.4cm);
+  \fill[white] (0,0) circle (0.15);
+  \end{scope}
+
+  % Legend
+  \begin{scope}[xshift=14cm, yshift=2cm]
+  \node[font=\small\bfseries, anchor=west] at (0,2.5) {Mixed Data (2.8KB)};
+  \fill[clinear] (0,1.7) rectangle (0.4,2.0); \node[font=\scriptsize, anchor=west] at (0.5,1.85) {LINEAR (4)};
+  \fill[cconst] (0,1.0) rectangle (0.4,1.3); \node[font=\scriptsize, anchor=west] at (0.5,1.15) {CONST (2)};
+  \fill[crepeat] (0,0.3) rectangle (0.4,0.6); \node[font=\scriptsize, anchor=west] at (0.5,0.45) {REPEAT (2)};
+  \fill[csparse] (0,-0.4) rectangle (0.4,-0.1); \node[font=\scriptsize, anchor=west] at (0.5,-0.25) {SPARSE (2)};
+  \fill[clinwide] (0,-1.1) rectangle (0.4,-0.8); \node[font=\scriptsize, anchor=west] at (0.5,-0.95) {LINEAR\_WIDE (2)};
+  \fill[cdelta] (0,-1.8) rectangle (0.4,-1.5); \node[font=\scriptsize, anchor=west] at (0.5,-1.65) {DELTA (1)};
+  \fill[crawdefl] (0,-2.5) rectangle (0.4,-2.2); \node[font=\scriptsize, anchor=west] at (0.5,-2.35) {RAW deflated (2)};
+  \fill[crawraw] (0,-3.2) rectangle (0.4,-2.9); \node[font=\scriptsize, anchor=west] at (0.5,-3.05) {RAW stored (2)};
+  \end{scope}
+\end{tikzpicture}
+\caption{Mixed data across two platters. Platter 0 shows diverse pattern types; Platter 1 distinguishes deflate-compressed (dark) from incompressible (light) raw tracks.}
+\label{fig:mixed}
+\end{figure}
+
 \section{Conclusion}
 
 PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, compressing parameter metadata across tracks, and optionally encrypting only the minimal parameter bytes, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The columnar pre-processing transform extends this advantage to record-oriented data, the structured encryption scheme demonstrates that compression and encryption need not be mutually exclusive, and the PLTI image codec achieves 17--113$\times$ compression on space-relevant imagery by exploiting the mathematical structure inherent in calibration frames, star fields, and illumination gradients.

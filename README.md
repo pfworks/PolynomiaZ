@@ -195,6 +195,8 @@ Per platter:
 - [x] Parallel processing (rayon — 9× speedup)
 - [x] Wire format specification (`doc/WIRE_FORMAT.md`)
 - [x] Auto-optimization (`pltz -b`, `pltz --analyze`)
+- [x] Visualization (`pltz --visualize` → SVG platter diagram)
+- [x] Video codec (PLTV — YCbCr 4:2:0, motion compensation, B-frames)
 
 ### Future Investigation: Alternative Geometries
 

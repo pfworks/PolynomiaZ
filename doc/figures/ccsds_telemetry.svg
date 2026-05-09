@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="750" height="620" viewBox="0 0 750 620">
+<rect width="100%" height="100%" fill="#1a1a2e"/>
+<circle cx="300" cy="310" r="188.0" fill="none" stroke="#FF9800" stroke-width="20.0" opacity="0.85"/>
+<circle cx="300" cy="310" r="163.0" fill="none" stroke="#FF9800" stroke-width="20.0" opacity="0.85"/>
+<circle cx="300" cy="310" r="138.0" fill="none" stroke="#FF9800" stroke-width="20.0" opacity="0.85"/>
+<circle cx="300" cy="310" r="113.0" fill="none" stroke="#FF9800" stroke-width="20.0" opacity="0.85"/>
+<circle cx="300" cy="310" r="88.0" fill="none" stroke="#FF9800" stroke-width="20.0" opacity="0.85"/>
+<circle cx="300" cy="310" r="63.0" fill="none" stroke="#FF9800" stroke-width="20.0" opacity="0.85"/>
+<circle cx="300" cy="310" r="55" fill="#333" stroke="#555" stroke-width="2"/>
+<text x="300" y="302" text-anchor="middle" fill="white" font-size="11" font-family="monospace">columnar stride=90, spt=512</text>
+<text x="300" y="318" text-anchor="middle" fill="white" font-size="9" font-family="monospace">6 tracks</text>
+<text x="620" y="35" fill="white" font-size="13" font-family="monospace" font-weight="bold">Legend</text>
+<rect x="620" y="39" width="14" height="14" fill="#FF9800" rx="2"/>
+<text x="640" y="50" fill="white" font-size="11" font-family="monospace">RLE (6)</text>
+<text x="300" y="20" text-anchor="middle" fill="white" font-size="14" font-family="monospace">tests/data/ccsds_telemetry.bin — 3000 bytes (columnar stride=90, spt=512)</text>
+</svg>

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="620" viewBox="0 0 1300 620">
+<rect width="100%" height="100%" fill="#1a1a2e"/>
+<text x="240" y="580" text-anchor="middle" fill="#aaa" font-size="12" font-family="monospace">Platter 0 (Structured)</text>
+<circle cx="240" cy="310" r="189.8" fill="none" stroke="#2196F3" stroke-width="20.0" opacity="0.85"/>
+<circle cx="240" cy="310" r="168.4" fill="none" stroke="#2196F3" stroke-width="20.0" opacity="0.85"/>
+<circle cx="240" cy="310" r="146.9" fill="none" stroke="#4CAF50" stroke-width="20.0" opacity="0.85"/>
+<circle cx="240" cy="310" r="125.5" fill="none" stroke="#4CAF50" stroke-width="20.0" opacity="0.85"/>
+<circle cx="240" cy="310" r="104.1" fill="none" stroke="#9C27B0" stroke-width="20.0" opacity="0.85"/>
+<circle cx="240" cy="310" r="82.6" fill="none" stroke="#FF9800" stroke-width="20.0" opacity="0.85"/>
+<circle cx="240" cy="310" r="61.2" fill="none" stroke="#3F51B5" stroke-width="20.0" opacity="0.85"/>
+<circle cx="240" cy="310" r="55" fill="#333" stroke="#555" stroke-width="2"/>
+<text x="240" y="302" text-anchor="middle" fill="white" font-size="11" font-family="monospace">Platter 0</text>
+<text x="240" y="318" text-anchor="middle" fill="white" font-size="9" font-family="monospace">7 tracks</text>
+<text x="700" y="580" text-anchor="middle" fill="#aaa" font-size="12" font-family="monospace">Platter 1 (Raw)</text>
+<circle cx="700" cy="310" r="181.8" fill="none" stroke="#616161" stroke-width="20.0" opacity="0.85"/>
+<circle cx="700" cy="310" r="144.2" fill="none" stroke="#616161" stroke-width="20.0" opacity="0.85"/>
+<circle cx="700" cy="310" r="106.8" fill="none" stroke="#BDBDBD" stroke-width="20.0" opacity="0.85"/>
+<circle cx="700" cy="310" r="69.2" fill="none" stroke="#BDBDBD" stroke-width="20.0" opacity="0.85"/>
+<circle cx="700" cy="310" r="55" fill="#333" stroke="#555" stroke-width="2"/>
+<text x="700" y="302" text-anchor="middle" fill="white" font-size="11" font-family="monospace">Platter 1</text>
+<text x="700" y="318" text-anchor="middle" fill="white" font-size="9" font-family="monospace">4 tracks</text>
+<text x="1050" y="35" fill="white" font-size="13" font-family="monospace" font-weight="bold">Legend</text>
+<rect x="1050" y="39" width="14" height="14" fill="#2196F3" rx="2"/>
+<text x="1070" y="50" fill="white" font-size="11" font-family="monospace">LINEAR (2)</text>
+<rect x="1050" y="59" width="14" height="14" fill="#4CAF50" rx="2"/>
+<text x="1070" y="70" fill="white" font-size="11" font-family="monospace">CONST (2)</text>
+<rect x="1050" y="79" width="14" height="14" fill="#9C27B0" rx="2"/>
+<text x="1070" y="90" fill="white" font-size="11" font-family="monospace">REPEAT (1)</text>
+<rect x="1050" y="99" width="14" height="14" fill="#616161" rx="2"/>
+<text x="1070" y="110" fill="white" font-size="11" font-family="monospace">RAW deflated (2)</text>
+<rect x="1050" y="119" width="14" height="14" fill="#BDBDBD" rx="2"/>
+<text x="1070" y="130" fill="white" font-size="11" font-family="monospace">RAW stored (2)</text>
+<rect x="1050" y="139" width="14" height="14" fill="#FF9800" rx="2"/>
+<text x="1070" y="150" fill="white" font-size="11" font-family="monospace">RLE (1)</text>
+<rect x="1050" y="159" width="14" height="14" fill="#3F51B5" rx="2"/>
+<text x="1070" y="170" fill="white" font-size="11" font-family="monospace">LINEAR_WIDE (1)</text>
+<text x="650" y="20" text-anchor="middle" fill="white" font-size="14" font-family="monospace">/tmp/mixed_demo.bin — 2816 bytes (spt=256)</text>
+</svg>
