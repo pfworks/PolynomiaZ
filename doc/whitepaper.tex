@@ -371,19 +371,25 @@ When using \texttt{pltz -b} (auto-optimize), the stride is detected automaticall
 Standard encryption and compression are fundamentally at odds:
 \begin{itemize}
 \item \textbf{Encrypt-then-compress}: Ciphertext is indistinguishable from random; no compression possible.
-\item \textbf{Compress-then-encrypt}: Compressed size leaks information about plaintext entropy (CRIME/BREACH attacks).
+\item \textbf{Compress-then-encrypt}: Achieves both, but compressed size leaks information about plaintext entropy (CRIME/BREACH attacks).
 \end{itemize}
 
-PLTZ Structured Encryption (PSE) offers a third option: encrypt only the \emph{parameter values} of detected patterns while leaving the pattern \emph{types} in the clear.
+PLTZ offers a third approach: compress first via pattern detection, then encrypt the compressed representation. Because the compressed form consists of (a) structural metadata (pattern types, track layout) and (b) parameter values, these can be encrypted independently, enabling multiple security/efficiency tradeoffs.
 
-\subsection{Scheme}
+\subsection{Three Encryption Modes}
 
-\begin{enumerate}
-\item Analyze plaintext with PLTZ pattern detection
-\item For each track, serialize the pattern parameters (start, step, raw bytes, etc.)
-\item Encrypt the serialized parameters with a stream cipher keyed by the user's secret
-\item Store: pattern type (public) + encrypted parameters (secret)
-\end{enumerate}
+\begin{description}
+\item[Structured (PLTE)] Encrypts only the parameter values. Pattern types remain visible. Smallest output. Suitable when the data schema is public but values are private.
+
+\item[Full (PLTF)] Encrypts both metadata and parameters in two separate streams using different counter offsets from the same key. No information leakage except total compressed size. Only 4 bytes larger than structured mode.
+
+\item[Dual-key (PLTD)] Encrypts metadata with an \emph{outer key} and parameters with an \emph{inner key}. Enables tiered access control:
+\begin{itemize}
+  \item Outer key only: observer sees structure (``track 0 is CONST, track 2 is LINEAR'') but cannot access values.
+  \item Both keys: full decryption and data reconstruction.
+  \item Use case: operators verify data format/integrity; analysts access measurements.
+\end{itemize}
+\end{description}
 
 \subsection{Results}
 
@@ -393,37 +399,51 @@ PLTZ Structured Encryption (PSE) offers a third option: encrypt only the \emph{p
 \toprule
 \textbf{Approach} & \textbf{4KB linear ramp} & \textbf{Security} \\
 \midrule
-Encrypt-then-compress & 4,096 B & IND-CPA (full semantic security) \\
+Encrypt-then-compress & 4,096 B & IND-CPA (full) \\
 Compress-then-encrypt & $\sim$315 B & Leaks compressed size \\
-\textbf{PLTZ structured encrypt} & \textbf{168 B} & Leaks pattern types \\
-\textbf{PLTZ full encrypt} & \textbf{172 B} & \textbf{No leakage} \\
+\textbf{PLTZ structured (PLTE)} & \textbf{168 B} & Leaks pattern types \\
+\textbf{PLTZ full (PLTF)} & \textbf{172 B} & \textbf{No leakage} \\
+\textbf{PLTZ dual-key (PLTD)} & \textbf{172 B} & Tiered (outer: structure; both: full) \\
 \bottomrule
 \end{tabular}
-\caption{Comparison of encryption+compression approaches.}
+\caption{Comparison of encryption+compression approaches. PLTZ modes achieve 24:1 compression while encrypted.}
 \end{table}
 
-The full encryption mode (PLTF) adds a second encrypted stream containing the metadata (pattern types, track indices, geometry). Both streams are encrypted with different counter offsets from the same key. The result leaks nothing except total compressed size---achieving the same security as encrypt-then-compress but at the compression ratio of compress-then-encrypt.
+\subsection{How It Works}
 
-A dual-key variant (PLTD) encrypts metadata with an \emph{outer key} and parameters with an \emph{inner key}. This enables tiered access control: a holder of only the outer key can see the data structure (``track 0 is CONST, track 2 is LINEAR'') without accessing the actual values. Full reconstruction requires both keys. This is useful for systems where operators need to verify data format/integrity without accessing sensitive measurements.
+\begin{enumerate}
+\item \textbf{Analyze}: Detect mathematical patterns in the plaintext (same as normal compression).
+\item \textbf{Serialize}: Convert each track's pattern parameters to bytes.
+\item \textbf{Encrypt stream 1} (parameters): Encrypt serialized parameters with the data key (or inner key in dual-key mode).
+\item \textbf{Encrypt stream 2} (metadata): Encrypt pattern types + track indices + geometry with the same key (PLTF) or a separate outer key (PLTD). In structured mode (PLTE), this stream is left unencrypted.
+\item \textbf{Output}: Header + encrypted metadata stream + encrypted parameter stream.
+\end{enumerate}
+
+Decryption reverses the process: decrypt metadata to learn pattern types, decrypt parameters to get values, evaluate mathematical functions to reconstruct original data.
 
 \subsection{Security Model}
 
-PSE intentionally leaks:
+\textbf{Structured mode (PLTE)} leaks:
 \begin{itemize}
 \item Pattern types per track (e.g., ``track 5 is LINEAR'')
-\item Number of tracks and their grouping
-\item File size and geometry
+\item Number of tracks, geometry, file size
 \end{itemize}
 
-PSE protects:
+\textbf{Full mode (PLTF)} leaks only:
 \begin{itemize}
-\item Actual data values (encrypted parameters)
-\item Relationships between parameter values across tracks
+\item Total compressed size (unavoidable without padding)
 \end{itemize}
 
-\textbf{Acceptable for:} IoT telemetry where the measurement schema is public (everyone knows you send timestamp + battery + temperature) but the values are private. Satellite housekeeping where frame structure is in public ICD documents.
+\textbf{Dual-key mode (PLTD)} provides:
+\begin{itemize}
+\item Outer key holder: sees structure (pattern types) but not values
+\item Inner key holder alone: cannot decrypt (needs metadata for reconstruction)
+\item Both keys: complete access
+\end{itemize}
 
-\textbf{Not acceptable for:} Any scenario requiring IND-CPA semantic security, or where the pattern type itself reveals sensitive information.
+\begin{center}
+\fbox{\parbox{0.85\textwidth}{\textbf{WARNING:} The current implementation uses a simplified stream cipher for demonstration. Production use requires ChaCha20-Poly1305 or AES-256-GCM with proper authentication tags.}}
+\end{center}
 
 \section{Image Codec (PLTI)}
 
