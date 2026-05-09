@@ -212,6 +212,7 @@ fn process_file(cli: &Cli, path: &str) -> Result<(), String> {
                 eprintln!("  {}: {:.3}:1 ({} → {} bytes)",
                     path, 1.0 / ratio, input_data.len(), compressed.len());
                 print_geometry_info(&compressed);
+                print_pattern_breakdown(&input_data);
             }
             if !cli.keep {
                 fs::remove_file(path).map_err(|e| e.to_string())?;
@@ -472,6 +473,50 @@ fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
         data.len() as f64 / best_size as f64);
 
     Ok(())
+}
+
+fn print_pattern_breakdown(data: &[u8]) {
+    use pltz::platter::*;
+    use pltz::analyzer::*;
+    use std::collections::HashMap;
+
+    let geom = pltz::codec::best_geometry_pub(data);
+    let tracks = lay_out(data, &geom);
+    let encodings = analyze_platter(&tracks);
+
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for enc in &encodings {
+        let name = match enc.pattern {
+            PatternType::Const => "CONST",
+            PatternType::Linear => "LINEAR",
+            PatternType::Rle => "RLE",
+            PatternType::Repeat => "REPEAT",
+            PatternType::Delta => "DELTA",
+            PatternType::Periodic => "PERIODIC",
+            PatternType::Poly => "POLY",
+            PatternType::LinearWide => "LINEAR_WIDE",
+            PatternType::LinearF64 => "LINEAR_F64",
+            PatternType::DeltaF64 => "DELTA_F64",
+            PatternType::XorMask => "XOR_MASK",
+            PatternType::Sparse => "SPARSE",
+            PatternType::PiecewiseLinear => "PIECEWISE_LIN",
+            PatternType::Mirror => "MIRROR",
+            PatternType::InterleavedLinear => "INTERLEAVED",
+            PatternType::Exponential => "EXPONENTIAL",
+            PatternType::DeltaRle => "DELTA_RLE",
+            PatternType::BitPacked => "BIT_PACKED",
+            PatternType::Raw | PatternType::RawCompressed => "RAW",
+        };
+        *counts.entry(name).or_insert(0) += 1;
+    }
+
+    let mut sorted: Vec<_> = counts.iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(a.1));
+
+    eprintln!("    patterns: {}", sorted.iter()
+        .map(|(name, count)| format!("{}×{}", count, name))
+        .collect::<Vec<_>>()
+        .join(", "));
 }
 
 fn print_geometry_info(compressed: &[u8]) {
