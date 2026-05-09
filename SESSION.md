@@ -251,6 +251,17 @@ types visible. This preserves the compression ratio.
 **Security tradeoff:** Leaks pattern types and track layout. Acceptable for IoT/telemetry
 where schema is public. NOT acceptable for IND-CPA requirements.
 
+**Full encryption mode (PLTF):** Added second stream that encrypts metadata
+(pattern types, track layout, geometry) in addition to parameters. No information
+leakage except total compressed size. Only 4 bytes larger than structured mode.
+
+| Mode | 4KB linear | Leakage |
+|------|-----------|---------|
+| Structured (PLTE) | 168B | Pattern types visible |
+| Full (PLTF) | 172B | Nothing (except total size) |
+| Compress-then-encrypt | ~315B | Compressed size |
+| Encrypt-then-compress | 4,096B | Nothing |
+
 **Production path:** Replace `stream_cipher()` with ChaCha20-Poly1305 or AES-256-GCM.
 Add authentication tags. Add key derivation (HKDF). Add nonce management.
 

@@ -396,10 +396,13 @@ PLTZ Structured Encryption (PSE) offers a third option: encrypt only the \emph{p
 Encrypt-then-compress & 4,096 B & IND-CPA (full semantic security) \\
 Compress-then-encrypt & $\sim$315 B & Leaks compressed size \\
 \textbf{PLTZ structured encrypt} & \textbf{168 B} & Leaks pattern types \\
+\textbf{PLTZ full encrypt} & \textbf{172 B} & \textbf{No leakage} \\
 \bottomrule
 \end{tabular}
 \caption{Comparison of encryption+compression approaches.}
 \end{table}
+
+The full encryption mode (PLTF) adds a second encrypted stream containing the metadata (pattern types, track indices, geometry). Both streams are encrypted with different counter offsets from the same key. The result leaks nothing except total compressed size---achieving the same security as encrypt-then-compress but at the compression ratio of compress-then-encrypt.
 
 \subsection{Security Model}
 

@@ -238,8 +238,14 @@ PLTZ Structured Encryption (PSE) encrypts pattern *parameters* while preserving 
 | Encrypt-then-compress | 4,096B | IND-CPA (full) |
 | Compress-then-encrypt | ~315B | Leaks compressed size |
 | **PLTZ structured encrypt** | **168B** | Leaks pattern types |
+| **PLTZ full encrypt** | **172B** | **No leakage** |
 
-**How it works:** Analyze data → detect patterns → encrypt only the parameter values (start, step, etc.) → store pattern types in the clear with encrypted parameters.
+**Two modes:**
+
+- **Structured (PLTE):** Encrypts parameters only. Pattern types visible. Smallest output.
+- **Full (PLTF):** Encrypts both metadata AND parameters in separate streams. No information leakage except total compressed size. Only 4 bytes larger than structured.
+
+**How it works:** Analyze data → detect patterns → encrypt parameters (stream 1) + encrypt metadata/pattern types (stream 2) → output both encrypted streams.
 
 **What's leaked:** Pattern types and track layout (attacker sees "track 5 is LINEAR" but not the values).
 

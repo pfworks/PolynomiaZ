@@ -3,3 +3,5 @@ __pycache__/
 *.pyo
 rust/target/
 pltzfs/target/
+doc/patent_*.tex
+doc/patent_*.pdf
