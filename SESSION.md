@@ -313,3 +313,14 @@ Clean synthetic (no noise):
 **Key insight:** Sensor noise defeats H.264's motion estimation (it sees "motion"
 that's actually noise). PLTV's quality threshold absorbs the noise, making static
 regions collapse to CONST regardless of noise level.
+
+The alternative geometries (spiral, zoned, fractal) were tested against
+the standard adaptive approach on all 8 real-world test files.
+
+Result: No improvement. The adaptive geometry search (7 sector sizes)
+already achieves 0 RAW tracks at spt=8, but the per-track overhead
+(3 bytes × many tracks) makes larger sector sizes optimal for total
+compressed size. The current approach finds this sweet spot automatically.
+
+Alternative geometries remain on the roadmap as 'Future Investigation'
+but are deprioritized based on these results.
