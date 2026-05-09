@@ -509,6 +509,165 @@ pub fn decrypt_full(encrypted: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, String>
     Ok(result)
 }
 
+/// Dual-key full encryption: outer key encrypts metadata, inner key encrypts parameters.
+///
+/// Access levels:
+/// - Outer key only: can see pattern types and structure (not values)
+/// - Both keys: full decryption
+///
+/// Format (PLTD):
+///   [4] Magic "PLTD"
+///   [4] Original data length
+///   [12] Nonce
+///   [2] Encrypted metadata length (outer_key)
+///   [...] Encrypted metadata
+///   [2] Encrypted params length (inner_key)
+///   [...] Encrypted parameters
+///
+/// ⚠️ DEMO — uses simplified stream cipher.
+pub fn encrypt_dual_key(
+    data: &[u8],
+    outer_key: &[u8; 32],
+    inner_key: &[u8; 32],
+    nonce: &[u8; 12],
+) -> Vec<u8> {
+    if data.is_empty() {
+        let mut buf = Vec::with_capacity(24);
+        buf.extend_from_slice(b"PLTD");
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(nonce);
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        buf.extend_from_slice(&0u16.to_le_bytes());
+        return buf;
+    }
+
+    let geom = find_best_geometry(data);
+    let tracks = lay_out(data, &geom);
+    let encodings = analyze_platter(&tracks);
+
+    let mut metadata = Vec::new();
+    metadata.extend_from_slice(&(geom.sectors_per_track as u16).to_le_bytes());
+    metadata.extend_from_slice(&(encodings.len() as u16).to_le_bytes());
+    for enc in &encodings {
+        metadata.extend_from_slice(&enc.track_idx.to_le_bytes());
+        metadata.push(enc.pattern as u8);
+    }
+
+    let mut params_stream = Vec::new();
+    for enc in &encodings {
+        let param_bytes = serialize_params(&enc.params, geom.sectors_per_track);
+        params_stream.extend_from_slice(&(param_bytes.len() as u16).to_le_bytes());
+        params_stream.extend_from_slice(&param_bytes);
+    }
+
+    let encrypted_metadata = stream_cipher(&metadata, outer_key, nonce, 0);
+    let encrypted_params = stream_cipher(&params_stream, inner_key, nonce, 0);
+
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"PLTD");
+    buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    buf.extend_from_slice(nonce);
+    buf.extend_from_slice(&(encrypted_metadata.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&encrypted_metadata);
+    buf.extend_from_slice(&(encrypted_params.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&encrypted_params);
+    buf
+}
+
+/// Decrypt dual-key encrypted data. Requires both keys.
+pub fn decrypt_dual_key(
+    encrypted: &[u8],
+    outer_key: &[u8; 32],
+    inner_key: &[u8; 32],
+) -> Result<Vec<u8>, String> {
+    if encrypted.len() < 24 || &encrypted[0..4] != b"PLTD" {
+        return Err("Bad magic (expected PLTD)".into());
+    }
+
+    let original_len = u32::from_le_bytes(encrypted[4..8].try_into().unwrap()) as usize;
+    let nonce: [u8; 12] = encrypted[8..20].try_into().unwrap();
+    if original_len == 0 { return Ok(Vec::new()); }
+
+    let mut pos = 20;
+    let meta_len = u16::from_le_bytes(encrypted[pos..pos + 2].try_into().unwrap()) as usize;
+    pos += 2;
+    let metadata = stream_cipher(&encrypted[pos..pos + meta_len], outer_key, &nonce, 0);
+    pos += meta_len;
+
+    let params_len = u16::from_le_bytes(encrypted[pos..pos + 2].try_into().unwrap()) as usize;
+    pos += 2;
+    let params_stream = stream_cipher(&encrypted[pos..pos + params_len], inner_key, &nonce, 0);
+
+    let sectors = u16::from_le_bytes(metadata[0..2].try_into().unwrap()) as usize;
+    let num_tracks = u16::from_le_bytes(metadata[2..4].try_into().unwrap()) as usize;
+
+    let mut track_info: Vec<(u16, u8)> = Vec::with_capacity(num_tracks);
+    let mut mpos = 4;
+    for _ in 0..num_tracks {
+        let track_idx = u16::from_le_bytes(metadata[mpos..mpos + 2].try_into().unwrap());
+        let tag = metadata[mpos + 2];
+        mpos += 3;
+        track_info.push((track_idx, tag));
+    }
+
+    let total_tracks = (original_len + sectors - 1) / sectors;
+    let mut all_tracks: Vec<Option<Vec<u8>>> = vec![None; total_tracks];
+    let mut ppos = 0;
+
+    for &(track_idx, tag) in &track_info {
+        let param_len = u16::from_le_bytes(params_stream[ppos..ppos + 2].try_into().unwrap()) as usize;
+        ppos += 2;
+        let param_bytes = &params_stream[ppos..ppos + param_len];
+        ppos += param_len;
+        let pattern = PatternType::from_u8(tag).ok_or("Bad pattern tag")?;
+        let track = reconstruct_track(param_bytes, pattern, sectors)?;
+        if (track_idx as usize) < all_tracks.len() {
+            all_tracks[track_idx as usize] = Some(track);
+        }
+    }
+
+    let mut result = Vec::with_capacity(original_len);
+    for i in 0..total_tracks {
+        match &all_tracks[i] {
+            Some(track) => result.extend_from_slice(track),
+            None => return Err(format!("Missing track {}", i)),
+        }
+    }
+    result.truncate(original_len);
+    Ok(result)
+}
+
+/// With outer key only: see structure but not values.
+pub fn decrypt_metadata_only(
+    encrypted: &[u8],
+    outer_key: &[u8; 32],
+) -> Result<Vec<(u16, &'static str)>, String> {
+    if encrypted.len() < 24 || &encrypted[0..4] != b"PLTD" {
+        return Err("Bad magic (expected PLTD)".into());
+    }
+    let nonce: [u8; 12] = encrypted[8..20].try_into().unwrap();
+    let mut pos = 20;
+    let meta_len = u16::from_le_bytes(encrypted[pos..pos + 2].try_into().unwrap()) as usize;
+    pos += 2;
+    let metadata = stream_cipher(&encrypted[pos..pos + meta_len], outer_key, &nonce, 0);
+
+    let num_tracks = u16::from_le_bytes(metadata[2..4].try_into().unwrap()) as usize;
+    let mut result = Vec::with_capacity(num_tracks);
+    let mut mpos = 4;
+    for _ in 0..num_tracks {
+        let track_idx = u16::from_le_bytes(metadata[mpos..mpos + 2].try_into().unwrap());
+        let tag = metadata[mpos + 2];
+        mpos += 3;
+        let name = match tag {
+            0 => "CONST", 1 => "LINEAR", 2 => "RLE", 3 => "REPEAT",
+            4 => "DELTA", 7 => "RAW", 9 => "LINEAR_WIDE", 10 => "LINEAR_F64",
+            _ => "OTHER",
+        };
+        result.push((track_idx, name));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,5 +762,45 @@ mod tests {
             structured.len(), full.len());
         // Full should be slightly larger (metadata overhead) but still compact
         assert!(full.len() < data.len());
+    }
+
+    #[test]
+    fn test_dual_key_roundtrip() {
+        let outer = [0x11u8; 32];
+        let inner = [0x22u8; 32];
+        let nonce = [0x33u8; 12];
+
+        let data: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
+        let encrypted = encrypt_dual_key(&data, &outer, &inner, &nonce);
+        let decrypted = decrypt_dual_key(&encrypted, &outer, &inner).unwrap();
+        assert_eq!(data, decrypted);
+
+        println!("Dual-key 1KB: {} bytes", encrypted.len());
+        assert!(encrypted.len() < data.len());
+    }
+
+    #[test]
+    fn test_dual_key_metadata_only() {
+        let outer = [0xAA; 32];
+        let inner = [0xBB; 32];
+        let nonce = [0xCC; 12];
+
+        let mut data = vec![0xFFu8; 512]; // CONST
+        data.extend((0..=255u8).collect::<Vec<_>>()); // LINEAR
+        data.extend(vec![0x42u8; 256]); // CONST
+
+        let encrypted = encrypt_dual_key(&data, &outer, &inner, &nonce);
+
+        // With outer key only: can see structure
+        let meta = decrypt_metadata_only(&encrypted, &outer).unwrap();
+        println!("Metadata-only view: {:?}", meta);
+        assert!(!meta.is_empty());
+        // Should see CONST and LINEAR pattern types
+        let has_const = meta.iter().any(|(_, name)| *name == "CONST");
+        assert!(has_const, "Should see CONST with outer key");
+
+        // Full decrypt needs both keys
+        let full = decrypt_dual_key(&encrypted, &outer, &inner).unwrap();
+        assert_eq!(data, full);
     }
 }
