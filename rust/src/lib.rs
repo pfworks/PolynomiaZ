@@ -6,3 +6,4 @@ pub mod columnar;
 pub mod encrypt;
 pub mod image;
 pub mod video;
+pub mod audio;
