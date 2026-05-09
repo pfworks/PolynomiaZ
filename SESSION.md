@@ -255,10 +255,16 @@ where schema is public. NOT acceptable for IND-CPA requirements.
 (pattern types, track layout, geometry) in addition to parameters. No information
 leakage except total compressed size. Only 4 bytes larger than structured mode.
 
+**Dual-key mode (PLTD):** Outer key encrypts metadata, inner key encrypts parameters.
+- Outer key only → see structure ("track 0 is CONST, track 2 is LINEAR")
+- Both keys → full decryption
+- Use case: tiered access control (operators see schema, analysts see values)
+
 | Mode | 4KB linear | Leakage |
 |------|-----------|---------|
 | Structured (PLTE) | 168B | Pattern types visible |
 | Full (PLTF) | 172B | Nothing (except total size) |
+| Dual-key (PLTD) | 172B | Outer key: structure only |
 | Compress-then-encrypt | ~315B | Compressed size |
 | Encrypt-then-compress | 4,096B | Nothing |
 

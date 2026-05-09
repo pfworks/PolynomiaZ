@@ -244,6 +244,7 @@ PLTZ Structured Encryption (PSE) encrypts pattern *parameters* while preserving 
 
 - **Structured (PLTE):** Encrypts parameters only. Pattern types visible. Smallest output.
 - **Full (PLTF):** Encrypts both metadata AND parameters in separate streams. No information leakage except total compressed size. Only 4 bytes larger than structured.
+- **Dual-key (PLTD):** Outer key encrypts metadata, inner key encrypts parameters. Outer key holder sees structure only; both keys needed for full decryption.
 
 **How it works:** Analyze data → detect patterns → encrypt parameters (stream 1) + encrypt metadata/pattern types (stream 2) → output both encrypted streams.
 

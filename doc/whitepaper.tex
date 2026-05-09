@@ -404,6 +404,8 @@ Compress-then-encrypt & $\sim$315 B & Leaks compressed size \\
 
 The full encryption mode (PLTF) adds a second encrypted stream containing the metadata (pattern types, track indices, geometry). Both streams are encrypted with different counter offsets from the same key. The result leaks nothing except total compressed size---achieving the same security as encrypt-then-compress but at the compression ratio of compress-then-encrypt.
 
+A dual-key variant (PLTD) encrypts metadata with an \emph{outer key} and parameters with an \emph{inner key}. This enables tiered access control: a holder of only the outer key can see the data structure (``track 0 is CONST, track 2 is LINEAR'') without accessing the actual values. Full reconstruction requires both keys. This is useful for systems where operators need to verify data format/integrity without accessing sensitive measurements.
+
 \subsection{Security Model}
 
 PSE intentionally leaks:
