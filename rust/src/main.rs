@@ -440,6 +440,7 @@ fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
             PatternType::DiffTable => "DIFF_TABLE",
             PatternType::ModArith => "MOD_ARITH",
             PatternType::Fibonacci => "FIBONACCI",
+            PatternType::DeltaWide => "DELTA_WIDE",
             PatternType::Raw | PatternType::RawCompressed => "RAW",
         };
         *counts.entry(name).or_insert(0) += 1;
@@ -511,6 +512,7 @@ fn print_pattern_breakdown(data: &[u8]) {
             PatternType::DiffTable => "DIFF_TABLE",
             PatternType::ModArith => "MOD_ARITH",
             PatternType::Fibonacci => "FIBONACCI",
+            PatternType::DeltaWide => "DELTA_WIDE",
             PatternType::Raw | PatternType::RawCompressed => "RAW",
         };
         *counts.entry(name).or_insert(0) += 1;

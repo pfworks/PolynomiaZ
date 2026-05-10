@@ -27,6 +27,7 @@ pub enum PatternType {
     DiffTable = 21,     // Nth-order constant differences (integer exact)
     ModArith = 22,      // (a*i + b) mod m
     Fibonacci = 23,     // Linear recurrence: val[i] = c1*val[i-1] + c2*val[i-2]
+    DeltaWide = 24,     // u16/u32 values with i8/i16 deltas
 }
 
 impl PatternType {
@@ -55,6 +56,7 @@ impl PatternType {
             21 => Some(Self::DiffTable),
             22 => Some(Self::ModArith),
             23 => Some(Self::Fibonacci),
+            24 => Some(Self::DeltaWide),
             _ => None,
         }
     }
@@ -95,6 +97,8 @@ pub enum TrackParams {
     ModArith { a: u16, b: u16, m: u16 },
     /// Fibonacci/recurrence: val[i] = (c1*val[i-1] + c2*val[i-2]) mod 256
     Fibonacci { seed0: u8, seed1: u8, c1: u8, c2: u8 },
+    /// DeltaWide: u16/u32 values with small deltas stored as i8 or i16
+    DeltaWide { width: u8, delta_width: u8, start: u32, deltas: Vec<u8> },
 }
 
 #[derive(Debug, Clone)]
@@ -901,6 +905,70 @@ fn detect_fibonacci(track: &[u8]) -> Option<TrackParams> {
     None
 }
 
+/// DeltaWide: u16/u32 values with small deltas (i8 or i16).
+fn detect_delta_wide(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+
+    // Try u32 LE with i8 deltas
+    if n >= 8 && n % 4 == 0 {
+        let count = n / 4;
+        let words: Vec<u32> = (0..count)
+            .map(|i| u32::from_le_bytes([track[i*4], track[i*4+1], track[i*4+2], track[i*4+3]]))
+            .collect();
+
+        // Check if all deltas fit in i8
+        let mut deltas_i8: Vec<i8> = Vec::with_capacity(count - 1);
+        let mut all_fit_i8 = true;
+        for i in 1..count {
+            let d = words[i] as i64 - words[i-1] as i64;
+            if d >= -128 && d <= 127 {
+                deltas_i8.push(d as i8);
+            } else {
+                all_fit_i8 = false;
+                break;
+            }
+        }
+
+        if all_fit_i8 {
+            // Cost: 1(width) + 1(delta_width) + 4(start) + (count-1) deltas
+            let cost = 6 + count - 1;
+            if cost * 4 < n * 3 {
+                let delta_bytes: Vec<u8> = deltas_i8.iter().map(|&d| d as u8).collect();
+                return Some(TrackParams::DeltaWide {
+                    width: 4, delta_width: 1, start: words[0], deltas: delta_bytes,
+                });
+            }
+        }
+
+        // Try i16 deltas
+        let mut deltas_i16: Vec<i16> = Vec::with_capacity(count - 1);
+        let mut all_fit_i16 = true;
+        for i in 1..count {
+            let d = words[i] as i64 - words[i-1] as i64;
+            if d >= -32768 && d <= 32767 {
+                deltas_i16.push(d as i16);
+            } else {
+                all_fit_i16 = false;
+                break;
+            }
+        }
+
+        if all_fit_i16 {
+            let cost = 6 + (count - 1) * 2;
+            if cost * 4 < n * 3 {
+                let mut delta_bytes = Vec::with_capacity((count-1)*2);
+                for &d in &deltas_i16 { delta_bytes.extend_from_slice(&d.to_le_bytes()); }
+                return Some(TrackParams::DeltaWide {
+                    width: 4, delta_width: 2, start: words[0], deltas: delta_bytes,
+                });
+            }
+        }
+    }
+
+    // u16 with i8 deltas: only 50% savings, often beaten by deflate. Skip.
+    None
+}
+
 pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_const(track) {
         return TrackEncoding { pattern: PatternType::Const, params, track_idx };
@@ -939,6 +1007,9 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     }
     if let Some(params) = detect_delta_f64(track) {
         return TrackEncoding { pattern: PatternType::DeltaF64, params, track_idx };
+    }
+    if let Some(params) = detect_delta_wide(track) {
+        return TrackEncoding { pattern: PatternType::DeltaWide, params, track_idx };
     }
     if let Some(params) = detect_bit_packed(track) {
         return TrackEncoding { pattern: PatternType::BitPacked, params, track_idx };

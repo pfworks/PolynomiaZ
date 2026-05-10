@@ -241,6 +241,7 @@ fn pattern_color(p: PatternType) -> &'static str {
         PatternType::DiffTable => "#880E4F",
         PatternType::ModArith => "#1B5E20",
         PatternType::Fibonacci => "#E65100",
+        PatternType::DeltaWide => "#AD1457",
         PatternType::Raw | PatternType::RawCompressed => "#9E9E9E",
     }
 }
@@ -268,6 +269,7 @@ fn pattern_name(p: PatternType) -> &'static str {
         PatternType::DiffTable => "DIFF_TABLE",
         PatternType::ModArith => "MOD_ARITH",
         PatternType::Fibonacci => "FIBONACCI",
+        PatternType::DeltaWide => "DELTA_WIDE",
         PatternType::Raw | PatternType::RawCompressed => "RAW",
     }
 }

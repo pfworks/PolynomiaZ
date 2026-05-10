@@ -242,6 +242,7 @@ fn estimate_params_size(params: &TrackParams) -> usize {
         TrackParams::DiffTable { order, .. } => 1 + *order as usize + 1 + 4,
         TrackParams::ModArith { .. } => 6,
         TrackParams::Fibonacci { .. } => 4,
+        TrackParams::DeltaWide { deltas, .. } => 6 + deltas.len(),
     }
 }
 

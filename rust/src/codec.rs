@@ -371,6 +371,7 @@ fn estimate_track_size(enc: &TrackEncoding, sectors: usize) -> usize {
         TrackParams::DiffTable { order, .. } => 1 + *order as usize + 1 + 4,
         TrackParams::ModArith { .. } => 6,
         TrackParams::Fibonacci { .. } => 4,
+        TrackParams::DeltaWide { deltas, .. } => 6 + deltas.len(),
     }
 }
 
@@ -538,6 +539,14 @@ fn encode_track(buf: &mut Vec<u8>, enc: &TrackEncoding, _sectors: usize, raw_com
             buf.push(*seed1);
             buf.push(*c1);
             buf.push(*c2);
+        }
+        TrackParams::DeltaWide { width, delta_width, start, deltas } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::DeltaWide as u8);
+            buf.push(*width);
+            buf.push(*delta_width);
+            buf.extend_from_slice(&start.to_le_bytes());
+            buf.extend_from_slice(deltas);
         }
         TrackParams::Raw { data } => {
             if raw_comp != RawCompressor::None {
@@ -864,6 +873,34 @@ fn decode_track(buf: &[u8], offset: usize, sectors: usize) -> Result<(u16, Vec<u
                 let prev2 = track[track.len()-2] as u16;
                 track.push((c1 as u16 * prev1 + c2 as u16 * prev2) as u8);
             }
+            track
+        }
+        PatternType::DeltaWide => {
+            let width = buf[pos] as usize;
+            let delta_width = buf[pos+1] as usize;
+            let start = u32::from_le_bytes(buf[pos+2..pos+6].try_into().unwrap());
+            pos += 6;
+            let count = if width == 4 { sectors / 4 } else { sectors / 2 };
+            let mut values: Vec<u32> = Vec::with_capacity(count);
+            values.push(start);
+            for i in 0..(count - 1) {
+                let delta: i32 = if delta_width == 1 {
+                    let d = buf[pos + i] as i8;
+                    d as i32
+                } else {
+                    let d = i16::from_le_bytes(buf[pos + i*2..pos + i*2 + 2].try_into().unwrap());
+                    d as i32
+                };
+                let prev = *values.last().unwrap() as i64;
+                values.push((prev + delta as i64) as u32);
+            }
+            pos += (count - 1) * delta_width;
+            let mut track = Vec::with_capacity(sectors);
+            for &v in &values {
+                if width == 4 { track.extend_from_slice(&v.to_le_bytes()); }
+                else { track.extend_from_slice(&(v as u16).to_le_bytes()); }
+            }
+            track.truncate(sectors);
             track
         }
         PatternType::Raw => {
