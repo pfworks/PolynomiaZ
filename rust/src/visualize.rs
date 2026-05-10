@@ -238,6 +238,9 @@ fn pattern_color(p: PatternType) -> &'static str {
         PatternType::Exponential => "#795548",
         PatternType::DeltaRle => "#CDDC39",
         PatternType::BitPacked => "#009688",
+        PatternType::DiffTable => "#880E4F",
+        PatternType::ModArith => "#1B5E20",
+        PatternType::Fibonacci => "#E65100",
         PatternType::Raw | PatternType::RawCompressed => "#9E9E9E",
     }
 }
@@ -262,6 +265,9 @@ fn pattern_name(p: PatternType) -> &'static str {
         PatternType::Exponential => "EXPONENTIAL",
         PatternType::DeltaRle => "DELTA_RLE",
         PatternType::BitPacked => "BIT_PACKED",
+        PatternType::DiffTable => "DIFF_TABLE",
+        PatternType::ModArith => "MOD_ARITH",
+        PatternType::Fibonacci => "FIBONACCI",
         PatternType::Raw | PatternType::RawCompressed => "RAW",
     }
 }

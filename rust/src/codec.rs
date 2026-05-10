@@ -368,6 +368,9 @@ fn estimate_track_size(enc: &TrackEncoding, sectors: usize) -> usize {
         TrackParams::Exponential { .. } => 10,
         TrackParams::DeltaRle { runs, .. } => 3 + runs.len() * 2,
         TrackParams::BitPacked { packed, .. } => 1 + packed.len(),
+        TrackParams::DiffTable { order, .. } => 1 + *order as usize + 1 + 4,
+        TrackParams::ModArith { .. } => 6,
+        TrackParams::Fibonacci { .. } => 4,
     }
 }
 
@@ -513,6 +516,28 @@ fn encode_track(buf: &mut Vec<u8>, enc: &TrackEncoding, _sectors: usize, raw_com
             buf.push(PatternType::BitPacked as u8);
             buf.push(*bits);
             buf.extend_from_slice(packed);
+        }
+        TrackParams::DiffTable { order, initial, diff } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::DiffTable as u8);
+            buf.push(*order);
+            buf.extend_from_slice(initial);
+            buf.extend_from_slice(&diff.to_le_bytes());
+        }
+        TrackParams::ModArith { a, b, m } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::ModArith as u8);
+            buf.extend_from_slice(&a.to_le_bytes());
+            buf.extend_from_slice(&b.to_le_bytes());
+            buf.extend_from_slice(&m.to_le_bytes());
+        }
+        TrackParams::Fibonacci { seed0, seed1, c1, c2 } => {
+            buf.extend_from_slice(&enc.track_idx.to_le_bytes());
+            buf.push(PatternType::Fibonacci as u8);
+            buf.push(*seed0);
+            buf.push(*seed1);
+            buf.push(*c1);
+            buf.push(*c2);
         }
         TrackParams::Raw { data } => {
             if raw_comp != RawCompressor::None {
@@ -793,6 +818,51 @@ fn decode_track(buf: &[u8], offset: usize, sectors: usize) -> Result<(u16, Vec<u
                     bit_pos += 1;
                 }
                 track.push(val);
+            }
+            track
+        }
+        PatternType::DiffTable => {
+            let order = buf[pos] as usize; pos += 1;
+            let initial: Vec<i32> = (0..=order).map(|i| buf[pos + i] as i32).collect();
+            pos += order + 1;
+            let diff = i32::from_le_bytes(buf[pos..pos+4].try_into().unwrap());
+            pos += 4;
+            // Rebuild by maintaining difference levels
+            let mut levels: Vec<Vec<i32>> = vec![initial.clone()];
+            for lev in 1..=order {
+                let prev = &levels[lev - 1];
+                let d: Vec<i32> = prev.windows(2).map(|w| w[1] - w[0]).collect();
+                levels.push(d);
+            }
+            // Extend from bottom up
+            while levels[0].len() < sectors {
+                levels[order].push(diff);
+                for lev in (0..order).rev() {
+                    let prev_val = *levels[lev].last().unwrap();
+                    let d = *levels[lev + 1].last().unwrap();
+                    levels[lev].push(prev_val + d);
+                }
+            }
+            levels[0].iter().take(sectors).map(|&v| v as u8).collect()
+        }
+        PatternType::ModArith => {
+            let a = u16::from_le_bytes(buf[pos..pos+2].try_into().unwrap()) as u32;
+            let b = u16::from_le_bytes(buf[pos+2..pos+4].try_into().unwrap()) as u32;
+            let m = u16::from_le_bytes(buf[pos+4..pos+6].try_into().unwrap()) as u32;
+            pos += 6;
+            (0..sectors).map(|i| ((a * i as u32 + b) % m) as u8).collect()
+        }
+        PatternType::Fibonacci => {
+            let seed0 = buf[pos]; let seed1 = buf[pos+1];
+            let c1 = buf[pos+2]; let c2 = buf[pos+3];
+            pos += 4;
+            let mut track = Vec::with_capacity(sectors);
+            track.push(seed0);
+            if sectors > 1 { track.push(seed1); }
+            for _ in 2..sectors {
+                let prev1 = track[track.len()-1] as u16;
+                let prev2 = track[track.len()-2] as u16;
+                track.push((c1 as u16 * prev1 + c2 as u16 * prev2) as u8);
             }
             track
         }

@@ -24,6 +24,9 @@ pub enum PatternType {
     Exponential = 18,
     DeltaRle = 19,
     BitPacked = 20,
+    DiffTable = 21,     // Nth-order constant differences (integer exact)
+    ModArith = 22,      // (a*i + b) mod m
+    Fibonacci = 23,     // Linear recurrence: val[i] = c1*val[i-1] + c2*val[i-2]
 }
 
 impl PatternType {
@@ -49,6 +52,9 @@ impl PatternType {
             18 => Some(Self::Exponential),
             19 => Some(Self::DeltaRle),
             20 => Some(Self::BitPacked),
+            21 => Some(Self::DiffTable),
+            22 => Some(Self::ModArith),
+            23 => Some(Self::Fibonacci),
             _ => None,
         }
     }
@@ -83,6 +89,12 @@ pub enum TrackParams {
     DeltaRle { start: u8, runs: Vec<(i8, u8)> },
     /// BitPacked: all values fit in fewer than 8 bits, stored packed
     BitPacked { bits: u8, packed: Vec<u8> },
+    /// DiffTable: Nth-order differences are constant. Store order + initial values + constant diff.
+    DiffTable { order: u8, initial: Vec<u8>, diff: i32 },
+    /// ModArith: values follow (a*i + b) mod m
+    ModArith { a: u16, b: u16, m: u16 },
+    /// Fibonacci/recurrence: val[i] = (c1*val[i-1] + c2*val[i-2]) mod 256
+    Fibonacci { seed0: u8, seed1: u8, c1: u8, c2: u8 },
 }
 
 #[derive(Debug, Clone)]
@@ -781,6 +793,114 @@ fn detect_bit_packed(track: &[u8]) -> Option<TrackParams> {
     Some(TrackParams::BitPacked { bits, packed })
 }
 
+/// DiffTable: check if Nth-order differences are constant (integer exact).
+/// Order 1 = linear (already caught), order 2 = quadratic, etc.
+fn detect_diff_table(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    // Compute successive difference orders
+    let mut diffs: Vec<Vec<i32>> = vec![track.iter().map(|&b| b as i32).collect()];
+
+    for order in 1..=4u8 {
+        let prev = diffs.last().unwrap();
+        if prev.len() < 2 { return None; }
+        let next: Vec<i32> = prev.windows(2).map(|w| w[1] - w[0]).collect();
+        // Check if all values in this difference level are the same
+        if next.iter().all(|&v| v == next[0]) {
+            // Cost: 1 (order) + order+1 initial values + 4 (diff i32)
+            let cost = 1 + (order as usize + 1) + 4;
+            if cost < n && order >= 2 {
+                // Store initial values (first order+1 values of original)
+                let initial: Vec<u8> = track[..order as usize + 1].to_vec();
+                return Some(TrackParams::DiffTable {
+                    order,
+                    initial,
+                    diff: next[0],
+                });
+            }
+        }
+        diffs.push(next);
+    }
+    None
+}
+
+/// ModArith: values follow (a*i + b) mod m.
+fn detect_mod_arith(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    // Try to find a, b, m by examining the sequence
+    let b = track[0] as u16;
+
+    // Try common moduli
+    for &m in &[256u16, 128, 64, 32, 16, 100, 200, 255] {
+        if m < 2 { continue; }
+        // Compute a from first two values: track[1] = (a + b) mod m → a = (track[1] - b) mod m
+        let a = ((track[1] as i32 - b as i32).rem_euclid(m as i32)) as u16;
+        if a == 0 { continue; } // would be constant
+
+        // Verify all values
+        let mut valid = true;
+        for i in 0..n {
+            let expected = ((a as u32 * i as u32 + b as u32) % m as u32) as u8;
+            if track[i] != expected {
+                valid = false;
+                break;
+            }
+        }
+        if valid {
+            // Cost: 6 bytes (a u16 + b u16 + m u16)
+            if 6 < n {
+                return Some(TrackParams::ModArith { a, b, m });
+            }
+        }
+    }
+    None
+}
+
+/// Fibonacci/linear recurrence: val[i] = (c1*val[i-1] + c2*val[i-2]) mod 256.
+fn detect_fibonacci(track: &[u8]) -> Option<TrackParams> {
+    let n = track.len();
+    if n < 8 { return None; }
+
+    let s0 = track[0];
+    let s1 = track[1];
+
+    // Try to find c1, c2 from first few values
+    // track[2] = (c1*track[1] + c2*track[0]) mod 256
+    // track[3] = (c1*track[2] + c2*track[1]) mod 256
+    // Two equations, two unknowns (mod 256)
+
+    // Brute force small coefficients (0-15 for each)
+    for c1 in 0..=16u8 {
+        for c2 in 0..=16u8 {
+            if c1 == 0 && c2 == 0 { continue; }
+            if c1 == 1 && c2 == 0 { continue; } // would be constant/linear
+
+            let mut valid = true;
+            let mut prev2 = s0;
+            let mut prev1 = s1;
+            for i in 2..n {
+                let expected = (c1 as u16 * prev1 as u16 + c2 as u16 * prev2 as u16) as u8; // mod 256 implicit
+                if track[i] != expected {
+                    valid = false;
+                    break;
+                }
+                prev2 = prev1;
+                prev1 = expected;
+            }
+            if valid {
+                // Cost: 4 bytes (seed0 + seed1 + c1 + c2)
+                if 4 < n {
+                    return Some(TrackParams::Fibonacci { seed0: s0, seed1: s1, c1, c2 });
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_const(track) {
         return TrackEncoding { pattern: PatternType::Const, params, track_idx };
@@ -831,6 +951,15 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     }
     if let Some(params) = detect_poly(track) {
         return TrackEncoding { pattern: PatternType::Poly, params, track_idx };
+    }
+    if let Some(params) = detect_diff_table(track) {
+        return TrackEncoding { pattern: PatternType::DiffTable, params, track_idx };
+    }
+    if let Some(params) = detect_mod_arith(track) {
+        return TrackEncoding { pattern: PatternType::ModArith, params, track_idx };
+    }
+    if let Some(params) = detect_fibonacci(track) {
+        return TrackEncoding { pattern: PatternType::Fibonacci, params, track_idx };
     }
     if let Some(params) = detect_mirror(track) {
         return TrackEncoding { pattern: PatternType::Mirror, params, track_idx };

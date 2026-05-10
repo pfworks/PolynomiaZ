@@ -437,6 +437,9 @@ fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
             PatternType::Exponential => "EXPONENTIAL",
             PatternType::DeltaRle => "DELTA_RLE",
             PatternType::BitPacked => "BIT_PACKED",
+            PatternType::DiffTable => "DIFF_TABLE",
+            PatternType::ModArith => "MOD_ARITH",
+            PatternType::Fibonacci => "FIBONACCI",
             PatternType::Raw | PatternType::RawCompressed => "RAW",
         };
         *counts.entry(name).or_insert(0) += 1;
@@ -505,6 +508,9 @@ fn print_pattern_breakdown(data: &[u8]) {
             PatternType::Exponential => "EXPONENTIAL",
             PatternType::DeltaRle => "DELTA_RLE",
             PatternType::BitPacked => "BIT_PACKED",
+            PatternType::DiffTable => "DIFF_TABLE",
+            PatternType::ModArith => "MOD_ARITH",
+            PatternType::Fibonacci => "FIBONACCI",
             PatternType::Raw | PatternType::RawCompressed => "RAW",
         };
         *counts.entry(name).or_insert(0) += 1;
