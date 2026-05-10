@@ -169,6 +169,9 @@ Each track is tested against pattern detectors in priority order. When both RLE 
 18 & EXPONENTIAL & Geometric sequence $a \cdot r^i$ & 10 bytes \\
 19 & DELTA\_RLE & Run-length encoded deltas (staircases) & $3 + 2r$ bytes \\
 20 & BIT\_PACKED & Values fit in $<$7 bits, stored packed & $1 + \lceil nB/8 \rceil$ bytes \\
+21 & DIFF\_TABLE & Nth-order constant differences & $5$--$9$ bytes \\
+22 & MOD\_ARITH & Values follow $(a \cdot i + b) \bmod m$ & 6 bytes \\
+23 & FIBONACCI & Linear recurrence $c_1 v_{i-1} + c_2 v_{i-2}$ & 4 bytes \\
 7 & RAW & No pattern (fallback) & $S$ bytes \\
 8 & RAW\_COMPRESSED & RAW with deflate applied & $3 + n_c$ bytes \\
 \bottomrule
@@ -315,7 +318,7 @@ pltz -b file.bin        # auto-select best compression settings
 pltz --analyze file.bin # analyze data and recommend settings
 \end{lstlisting}
 
-The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 19 pattern types are implemented in Rust, with periodic detection using the \texttt{rustfft} library (O($n \log n$) FFT, tracks up to 4096 bytes). Pattern analysis is parallelized via \texttt{rayon} (per-track and per-geometry), yielding a 9$\times$ speedup on multi-core systems. The implementation includes 38 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption. A complete wire format specification is provided in \texttt{doc/WIRE\_FORMAT.md}.
+The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 22 pattern types are implemented in Rust, with periodic detection using the \texttt{rustfft} library (O($n \log n$) FFT, tracks up to 4096 bytes). Pattern analysis is parallelized via \texttt{rayon} (per-track and per-geometry), yielding a 9$\times$ speedup on multi-core systems. The implementation includes 38 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption. A complete wire format specification is provided in \texttt{doc/WIRE\_FORMAT.md}.
 
 \section{Comparison with Existing Work}
 
@@ -740,6 +743,9 @@ Per platter: \texttt{[2] num\_entries (uint16 LE)}, followed by entries.
 18 & EXPONENTIAL & \texttt{count(u16) + base(f32) + ratio(f32)} \\
 19 & DELTA\_RLE & \texttt{start(u8) + num\_runs(u16) + [delta(i8)+count(u8)]$\times$N} \\
 20 & BIT\_PACKED & \texttt{bits(u8) + packed\_data($\lceil$n$\times$bits/8$\rceil$ bytes)} \\
+21 & DIFF\_TABLE & \texttt{order(u8) + initial(order+1 bytes) + diff(i32)} \\
+22 & MOD\_ARITH & \texttt{a(u16) + b(u16) + m(u16)} \\
+23 & FIBONACCI & \texttt{seed0(u8) + seed1(u8) + c1(u8) + c2(u8)} \\
 \bottomrule
 \end{tabular}
 \end{table}

@@ -90,6 +90,9 @@ Offset  Size  Field
 | 18 | EXPONENTIAL | `count(u16) + base(f32) + ratio(f32)` |
 | 19 | DELTA_RLE | `start(u8) + num_runs(u16) + [delta(i8) + count(u8)] × N` |
 | 20 | BIT_PACKED | `bits(u8) + packed_data(⌈sectors×bits/8⌉ bytes)` |
+| 21 | DIFF_TABLE | `order(u8) + initial(order+1 bytes) + diff(i32 LE)` |
+| 22 | MOD_ARITH | `a(u16) + b(u16) + m(u16)` |
+| 23 | FIBONACCI | `seed0(u8) + seed1(u8) + c1(u8) + c2(u8)` |
 
 ### RAW_COMPRESSED Methods
 
@@ -207,6 +210,9 @@ Given pattern tag and payload, reconstruct `sectors` bytes:
 - **EXPONENTIAL:** `output[i] = round(base * ratio^i) as u8`.
 - **DELTA_RLE:** Start with `start`, expand each (delta, count) run: add `delta` to current value `count` times.
 - **BIT_PACKED:** Read `bits` per value from packed data (MSB first within each byte). Each value is `bits` wide.
+- **DIFF_TABLE:** Reconstruct using forward differences: maintain `order` levels of differences, extend from bottom (constant diff) up.
+- **MOD_ARITH:** `output[i] = (a*i + b) mod m` as u8.
+- **FIBONACCI:** `output[0]=seed0, output[1]=seed1, output[i]=(c1*output[i-1]+c2*output[i-2]) mod 256`.
 - **RAW:** Copy bytes directly.
 - **RAW_COMPRESSED:** Decompress with indicated method, then copy.
 
