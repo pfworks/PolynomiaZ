@@ -93,6 +93,7 @@ Offset  Size  Field
 | 21 | DIFF_TABLE | `order(u8) + initial(order+1 bytes) + diff(i32 LE)` |
 | 22 | MOD_ARITH | `a(u16) + b(u16) + m(u16)` |
 | 23 | FIBONACCI | `seed0(u8) + seed1(u8) + c1(u8) + c2(u8)` |
+| 24 | DELTA_WIDE | `width(u8) + delta_width(u8) + start(u32 LE) + deltas((count-1)×dw bytes)` |
 
 ### RAW_COMPRESSED Methods
 
@@ -213,6 +214,7 @@ Given pattern tag and payload, reconstruct `sectors` bytes:
 - **DIFF_TABLE:** Reconstruct using forward differences: maintain `order` levels of differences, extend from bottom (constant diff) up.
 - **MOD_ARITH:** `output[i] = (a*i + b) mod m` as u8.
 - **FIBONACCI:** `output[0]=seed0, output[1]=seed1, output[i]=(c1*output[i-1]+c2*output[i-2]) mod 256`.
+- **DELTA_WIDE:** Read start as u32, then accumulate deltas (i8 if dw=1, i16 if dw=2). Pack each value as u32 LE (or u16 if width=2).
 - **RAW:** Copy bytes directly.
 - **RAW_COMPRESSED:** Decompress with indicated method, then copy.
 

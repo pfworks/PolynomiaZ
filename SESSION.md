@@ -191,7 +191,7 @@ Per platter:
 
 - [x] Python prototype (reference implementation, now in tests/lib/)
 - [x] Rust implementation with bzip2-style CLI
-- [x] 22 pattern types including wide-word and f64 analysis
+- [x] 23 pattern types including wide-word and f64 analysis
 - [x] Cross-track meta-descriptors
 - [x] Adaptive sector sizing (7 geometries)
 - [x] Multi-platter splitting
