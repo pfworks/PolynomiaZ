@@ -18,7 +18,7 @@
   backgroundcolor=\color{gray!10}
 }
 
-\title{\textbf{PolynomiaZ: Polar Coordinate Compression via\\Mathematical Function Fitting on Virtual Disk Platters}}
+\title{\textbf{PolynomiaZ: Lossless Compression via\\Mathematical Function Fitting on Virtual Disk Platters}}
 \author{Rory Toma}
 \date{May 2026}
 
@@ -41,12 +41,7 @@ This approach is not general-purpose. It targets a specific domain: data with kn
 
 \subsection{Disk Platter Model}
 
-Input data of length $N$ bytes is mapped onto a virtual disk with geometry $(T, S)$ where $T$ is the number of concentric tracks and $S$ is the number of sectors per track, such that $T \times S \geq N$. Each byte occupies a position $(r, \theta)$ in polar coordinates:
-\begin{align}
-r &= \lfloor i / S \rfloor \quad \text{(track index)} \\
-\theta &= \frac{2\pi (i \bmod S)}{S} \quad \text{(angular position)}
-\end{align}
-where $i$ is the byte's sequential position in the input.
+Input data of length $N$ bytes is mapped onto a virtual disk with geometry $(T, S)$ where $T$ is the number of concentric tracks and $S$ is the number of sectors per track, such that $T \times S \geq N$. Each byte at sequential position $i$ is assigned to track $\lfloor i / S \rfloor$ at sector position $(i \bmod S)$. This partitioning determines how the data is divided into chunks for pattern analysis.
 
 \begin{figure}[h]
 \centering
@@ -68,20 +63,14 @@ where $i$ is the byte's sequential position in the input.
   \foreach \s/\angle in {0/67.5, 1/22.5, 2/337.5, 3/292.5, 4/247.5, 5/202.5, 6/157.5, 7/112.5} {
     \node[font=\footnotesize] at (\angle:3.6) {S\s};
   }
-  % Highlight one sector (S1 on Track 0, centered at 22.5 degrees)
+  % Highlight one sector
   \fill[blue!20] (0:2.7) arc (0:45:2.7) -- (45:3.3) arc (45:0:3.3) -- cycle;
   \draw[blue!60, thick] (0:2.7) arc (0:45:2.7) -- (45:3.3) arc (45:0:3.3) -- cycle;
   \node[font=\footnotesize, blue] at (22.5:4.0) {byte $i$};
   % Center
   \fill (0,0) circle (0.05);
-  % r arrow from center to middle of highlighted sector
-  \draw[->, thick] (0,0) -- (22.5:3.0);
-  \node[font=\footnotesize, anchor=south west] at (22.5:1.5) {$r$};
-  % theta arc from horizontal to the sector center
-  \draw[->, thick] (0.9,0) arc (0:22.5:0.9);
-  \node[font=\footnotesize] at (11:1.2) {$\theta$};
 \end{tikzpicture}
-\caption{Disk platter model: input bytes are arranged in concentric tracks divided into sectors. Each byte at position $i$ maps to polar coordinates $(r, \theta)$.}
+\caption{Disk platter model: input bytes are arranged in concentric tracks divided into sectors. The geometry determines how data is partitioned for pattern analysis.}
 \end{figure}
 
 \subsection{Adaptive Geometry Selection}

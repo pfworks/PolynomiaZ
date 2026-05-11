@@ -1,6 +1,6 @@
 # PolynomiaZ (PLTZ)
 
-Polar coordinate compression — lossless codec that models data as mathematical functions on virtual disk platters. 5-12× better than zlib on structured numerical data.
+Lossless codec that models data as mathematical functions on virtual disk platters. 5-12× better than zlib on structured numerical data.
 
 ## What It Does
 

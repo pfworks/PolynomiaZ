@@ -2,7 +2,7 @@
 name = "pltz"
 version = "0.1.0"
 edition = "2021"
-description = "Polar coordinate compression — models data as mathematical functions on virtual disk platters"
+description = "Lossless codec that models data as mathematical functions on virtual disk platters"
 
 [dependencies]
 flate2 = "=1.0.28"

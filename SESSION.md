@@ -4,7 +4,7 @@
 
 ### Concept
 
-Polar coordinate compression. Map data onto virtual disk platters (tracks × sectors),
+Map data onto virtual disk platters (tracks × sectors),
 detect mathematical patterns per track, store compact function descriptions instead of raw bytes.
 Multiple platters allow separate functions without overlap.
 
