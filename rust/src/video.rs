@@ -129,11 +129,6 @@ pub fn decode_video(data: &[u8]) -> Result<(Vec<RgbFrame>, VideoParams), String>
     let h = height as usize;
 
     let mut frames = Vec::with_capacity(num_frames);
-    let mut offset = 12;
-
-    let mut ref_y: Vec<u8> = Vec::new();
-    let mut ref_cb: Vec<u8> = Vec::new();
-    let mut ref_cr: Vec<u8> = Vec::new();
 
     // First pass: collect all frame metadata
     struct FrameInfo { frame_type: u8, data_offset: usize, data_len: usize }
@@ -288,7 +283,7 @@ fn encode_iframe(y: &[u8], cb: &[u8], cr: &[u8], w: usize, h: usize, quality: u8
     buf
 }
 
-fn decode_iframe(data: &[u8], w: usize, h: usize) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
+fn decode_iframe(data: &[u8], _w: usize, _h: usize) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
     let mut pos = 0;
 
     let y_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize; pos += 4;

@@ -2,7 +2,6 @@
 
 use pltz::platter::*;
 use pltz::analyzer::*;
-use pltz::columnar;
 
 pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
     // Use the same logic as the encoder (optimize for compressed size)
@@ -51,7 +50,7 @@ pub fn visualize_data(path: &str, data: &[u8]) -> Result<(), String> {
     let tracks = lay_out(&best_data, &best_geom);
     let encodings = analyze_platter(&tracks);
 
-    let num_tracks = encodings.len();
+    let _num_tracks = encodings.len();
     let spt = best_geom.sectors_per_track;
     let subtitle = match used_stride {
         Some(s) => format!("columnar stride={}, spt={}", s, spt),

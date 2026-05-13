@@ -7,7 +7,7 @@ use crate::platter::*;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
-use std::io::{Read, Write, Cursor};
+use std::io::{Read, Write};
 
 const MAGIC: &[u8; 4] = b"PLTZ";
 const MAGIC_COLUMNAR: &[u8; 4] = b"PLTC"; // Columnar-transformed variant
@@ -62,7 +62,19 @@ pub fn encode_auto(data: &[u8], raw_compressor: RawCompressor, strides: &[usize]
 ///     [4] Compressed chunk length (uint32 LE)
 ///     [...] PLTZ-encoded chunk (independent, own geometry)
 pub fn encode_chunked(data: &[u8], raw_compressor: RawCompressor, chunk_size: usize) -> Vec<u8> {
+    use rayon::prelude::*;
+
     let num_chunks = if data.is_empty() { 0 } else { (data.len() + chunk_size - 1) / chunk_size };
+
+    // Compress all chunks in parallel
+    let compressed_chunks: Vec<Vec<u8>> = (0..num_chunks)
+        .into_par_iter()
+        .map(|i| {
+            let start = i * chunk_size;
+            let end = std::cmp::min(start + chunk_size, data.len());
+            encode(&data[start..end], raw_compressor)
+        })
+        .collect();
 
     let mut buf = Vec::new();
     buf.extend_from_slice(b"PLTS");
@@ -71,13 +83,9 @@ pub fn encode_chunked(data: &[u8], raw_compressor: RawCompressor, chunk_size: us
     buf.extend_from_slice(&(chunk_size as u32).to_le_bytes());
     buf.extend_from_slice(&(num_chunks as u16).to_le_bytes());
 
-    for i in 0..num_chunks {
-        let start = i * chunk_size;
-        let end = std::cmp::min(start + chunk_size, data.len());
-        let chunk = &data[start..end];
-        let compressed_chunk = encode(chunk, raw_compressor);
+    for compressed_chunk in &compressed_chunks {
         buf.extend_from_slice(&(compressed_chunk.len() as u32).to_le_bytes());
-        buf.extend_from_slice(&compressed_chunk);
+        buf.extend_from_slice(compressed_chunk);
     }
 
     buf

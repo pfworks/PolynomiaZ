@@ -63,6 +63,11 @@ struct Cli {
     #[arg(short = 'b', long)]
     best: bool,
 
+    /// Number of threads: 0 or "unlimited" for all cores, N for specific count,
+    /// "N%" for percentage of available cores (rounded down). Default: 0 (all cores).
+    #[arg(short = 'j', long = "threads", default_value = "0")]
+    threads: String,
+
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
@@ -87,6 +92,29 @@ fn parse_size(s: &str) -> Result<usize, String> {
     Ok(num * multiplier)
 }
 
+/// Parse thread count: "0" or "unlimited" = all cores, "N" = specific count, "N%" = percentage.
+fn parse_threads(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    if s == "0" || s.eq_ignore_ascii_case("unlimited") || s.eq_ignore_ascii_case("all") {
+        return Ok(0); // rayon default = all cores
+    }
+    if let Some(pct_str) = s.strip_suffix('%') {
+        let pct: f64 = pct_str.parse().map_err(|_| format!("invalid percentage: {}", s))?;
+        if pct <= 0.0 || pct > 100.0 {
+            return Err("percentage must be between 1 and 100".into());
+        }
+        let available = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let threads = (available as f64 * pct / 100.0).floor() as usize;
+        Ok(threads.max(1))
+    } else {
+        let n: usize = s.parse().map_err(|_| format!("invalid thread count: {}", s))?;
+        if n == 0 { return Ok(0); }
+        Ok(n)
+    }
+}
+
 /// Auto-detect optimal chunk size based on file size.
 /// Heuristic: aim for 16-256 chunks, with chunk sizes that are powers of 2.
 fn auto_chunk_size(data_len: usize) -> usize {
@@ -105,6 +133,23 @@ fn auto_chunk_size(data_len: usize) -> usize {
 
 fn main() {
     let cli = Cli::parse();
+
+    // Configure rayon thread pool
+    let num_threads = parse_threads(&cli.threads).unwrap_or_else(|e| {
+        eprintln!("pltz: invalid --threads value '{}': {}", cli.threads, e);
+        process::exit(1);
+    });
+    if num_threads > 0 {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build_global()
+            .unwrap_or(());
+    }
+    // num_threads == 0 means use rayon default (all cores)
+
+    if cli.verbose {
+        eprintln!("  threads: {}", rayon::current_num_threads());
+    }
 
     if cli.files.is_empty() && atty::is(atty::Stream::Stdin) {
         eprintln!("pltz: no files specified. Use - for stdin or --help for usage.");
@@ -291,50 +336,68 @@ fn detect_strides(data: &[u8]) -> Vec<usize> {
 }
 
 fn find_best_compression(data: &[u8], verbose: bool) -> Vec<u8> {
-    use pltz::codec::RawCompressor;
+    use rayon::prelude::*;
 
     // Use fast compressor for search, then re-encode winner with best
     let search_comp = RawCompressor::Zlib;
     let final_comp = RawCompressor::Best;
 
     if verbose { eprint!("  [best] plain..."); }
-    let mut best = pltz::codec::encode(data, search_comp);
-    let mut best_mode: BestMode = BestMode::Plain;
-    if verbose { eprintln!(" {}B", best.len()); }
+    let plain = pltz::codec::encode(data, search_comp);
+    if verbose { eprintln!(" {}B", plain.len()); }
 
-    // Auto-detect strides + try them
-    let strides = detect_strides(data);
-    for stride in strides {
-        if stride >= data.len() || stride < 2 { continue; }
-        if verbose { eprint!("  [best] stride={}...", stride); }
-        let transformed = pltz::columnar::columnar_transform(data, stride);
-        let inner = pltz::codec::encode(&transformed, search_comp);
-        let total_size = 10 + inner.len();
-        if total_size < best.len() {
-            best_mode = BestMode::Columnar(stride);
-            let mut buf = Vec::with_capacity(total_size);
-            buf.extend_from_slice(b"PLTC");
-            buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
-            buf.extend_from_slice(&(stride as u16).to_le_bytes());
-            buf.extend_from_slice(&inner);
-            best = buf;
-            if verbose { eprintln!(" {}B ★", total_size); }
-        } else {
-            if verbose { eprintln!(" {}B", total_size); }
+    // Auto-detect strides + try them in parallel
+    let strides: Vec<usize> = detect_strides(data).into_iter()
+        .filter(|&s| s >= 2 && s < data.len())
+        .collect();
+
+    let stride_results: Vec<(usize, usize)> = strides.par_iter()
+        .map(|&stride| {
+            let transformed = pltz::columnar::columnar_transform(data, stride);
+            let inner = pltz::codec::encode(&transformed, search_comp);
+            (stride, 10 + inner.len())
+        })
+        .collect();
+
+    if verbose {
+        for &(stride, size) in &stride_results {
+            eprintln!("  [best] stride={}: {}B{}", stride, size,
+                if size < plain.len() { " ★" } else { "" });
         }
     }
 
-    // Try chunked
-    for &chunk in &[4096, 8192, 16384, 32768, 65536] {
-        if chunk >= data.len() { continue; }
-        if verbose { eprint!("  [best] chunk={}k...", chunk/1024); }
-        let compressed = pltz::codec::encode_chunked(data, search_comp, chunk);
-        if compressed.len() < best.len() {
+    // Try chunked sizes in parallel
+    let chunk_candidates: Vec<usize> = [4096, 8192, 16384, 32768, 65536].iter()
+        .copied().filter(|&c| c < data.len()).collect();
+
+    let chunk_results: Vec<(usize, usize)> = chunk_candidates.par_iter()
+        .map(|&chunk| {
+            let compressed = pltz::codec::encode_chunked(data, search_comp, chunk);
+            (chunk, compressed.len())
+        })
+        .collect();
+
+    if verbose {
+        for &(chunk, size) in &chunk_results {
+            eprintln!("  [best] chunk={}k: {}B{}", chunk/1024, size,
+                if size < plain.len() { " ★" } else { "" });
+        }
+    }
+
+    // Find overall best
+    let mut best_size = plain.len();
+    let mut best_mode = BestMode::Plain;
+
+    for &(stride, size) in &stride_results {
+        if size < best_size {
+            best_size = size;
+            best_mode = BestMode::Columnar(stride);
+        }
+    }
+    for &(chunk, size) in &chunk_results {
+        if size < best_size {
+            best_size = size;
             best_mode = BestMode::Chunked(chunk);
-            best = compressed;
-            if verbose { eprintln!(" {}B ★", best.len()); }
-        } else {
-            if verbose { eprintln!(" {}B", compressed.len()); }
         }
     }
 
@@ -361,10 +424,8 @@ fn find_best_compression(data: &[u8], verbose: bool) -> Vec<u8> {
 enum BestMode { Plain, Columnar(usize), Chunked(usize) }
 
 fn analyze_data(path: &str, data: &[u8]) -> Result<(), String> {
-    use pltz::codec::RawCompressor;
     use pltz::platter::*;
     use pltz::analyzer::*;
-    use pltz::cross_track::cross_track_optimize;
     use std::collections::HashMap;
 
     eprintln!("Analyzing {} ({} bytes)...", path, data.len());
