@@ -429,12 +429,14 @@ Decryption reverses the process: decrypt metadata to learn pattern types, decryp
 \item Total compressed size (unavoidable without padding)
 \end{itemize}
 
-\textbf{Dual-key mode (PLTD)} provides:
+\textbf{Dual-key mode (PLTD)} leaks:
 \begin{itemize}
-\item Outer key holder: sees structure (pattern types) but not values
-\item Inner key holder alone: cannot decrypt (needs metadata for reconstruction)
-\item Both keys: complete access
+\item To outer key holder: pattern types and track layout (structure only, no values)
+\item To both key holders: full access (no leakage beyond total compressed size)
+\item Without any key: total compressed size only (same as PLTF)
 \end{itemize}
+
+\textbf{On compressed size leakage:} All compress-then-encrypt schemes leak the compressed size, which reveals information about plaintext entropy and structure. An attacker observing that a 4KB input compresses to 66 bytes can infer the data is highly structured (e.g., constant-filled firmware padding). This is the same class of side channel exploited by CRIME/BREACH attacks on TLS. Mitigations include padding output to fixed block sizes (at the cost of compression ratio) or using encrypt-then-compress (which eliminates compression entirely). For PLTZ's target domains (IoT telemetry, satellite housekeeping), the data schema is typically public and the compressed size reveals little beyond what the attacker already knows.
 
 \begin{center}
 \fbox{\parbox{0.85\textwidth}{\textbf{WARNING:} The current implementation uses a simplified stream cipher for demonstration. Production use requires ChaCha20-Poly1305 or AES-256-GCM with proper authentication tags.}}
