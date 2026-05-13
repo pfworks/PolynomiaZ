@@ -306,9 +306,11 @@ pltz -C 64k file.bin    # chunked mode (per-section geometry)
 pltz -C auto file.bin   # auto-detect chunk size
 pltz -b file.bin        # auto-select best compression settings
 pltz --analyze file.bin # analyze data and recommend settings
+pltz -j 4 file.bin      # limit to 4 threads
+pltz -j 50% file.bin    # use 50% of available cores
 \end{lstlisting}
 
-The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 23 pattern types are implemented in Rust, with periodic detection using the \texttt{rustfft} library (O($n \log n$) FFT, tracks up to 4096 bytes). Pattern analysis is parallelized via \texttt{rayon} (per-track and per-geometry), yielding a 9$\times$ speedup on multi-core systems. The implementation includes 48 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption. A complete wire format specification is provided in \texttt{doc/WIRE\_FORMAT.md}.
+The binary is approximately 1MB stripped, with no runtime dependencies beyond libc. All 23 pattern types are implemented in Rust, with periodic detection using the \texttt{rustfft} library (O($n \log n$) FFT, tracks up to 4096 bytes). Pattern analysis is parallelized via \texttt{rayon} (per-track and per-geometry), yielding a 9$\times$ speedup on multi-core systems. Thread count is configurable via \texttt{-j} (specific count, percentage, or unlimited). An entropy fast-path skips expensive detectors (FFT, polynomial fitting) on high-entropy tracks ($>$200 unique byte values) and skips zstd/brotli on raw tracks with $\geq$150 unique bytes, reducing worst-case latency by 27$\times$ on random data without affecting compression ratio on structured data. The implementation includes 48 unit tests covering all pattern types, cross-track optimization, columnar transforms, and structured encryption. A complete wire format specification is provided in \texttt{doc/WIRE\_FORMAT.md}.
 
 \section{Comparison with Existing Work}
 
@@ -519,7 +521,7 @@ The platter model also applies to PCM audio: each audio frame (e.g., 256 samples
 \textbf{Current limitations:}
 \begin{itemize}
 \item Periodic detection limited to tracks $\leq$ 4096 bytes (diminishing returns beyond)
-\item Slower than zlib due to adaptive geometry search (7 sector sizes $\times$ pattern detection)
+\item Slower than zlib on incompressible data due to adaptive geometry search (7 sector sizes), though entropy fast-path mitigates this (19--30ms per 4KB vs.\ sub-1ms for zlib)
 \item Cross-track requires $\geq$4 tracks with same pattern to activate
 \item Structured encryption uses demo cipher (not production-ready)
 \end{itemize}
@@ -534,6 +536,9 @@ The platter model also applies to PCM audio: each audio frame (e.g., 256 samples
 \item Audio codec (PLTA): PCM frame-based compression for calibration signals and telemetry audio
 \item C FFI bindings (\texttt{clib/}): \texttt{libpltz.so}/\texttt{libpltz.dylib} with compress/decompress/size API
 \item Compressed filesystem prototype (\texttt{pltzfs/}): multi-platter storage with per-type platters
+\item Configurable thread pool (\texttt{-j N}, \texttt{-j 50\%}, \texttt{-j unlimited})
+\item Entropy fast-path: skips expensive detectors and compressors on high-entropy data (27$\times$ faster on random data)
+\item Parallel chunk encoding and parallel best-mode search
 \end{itemize}
 
 \textbf{Future work:}

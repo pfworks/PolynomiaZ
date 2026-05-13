@@ -99,6 +99,9 @@ pltz -C 64k file.bin    # chunked mode (64KB chunks, per-section geometry)
 pltz -C auto file.bin   # auto-detect chunk size
 pltz -b file.bin        # auto-select best compression settings
 pltz --analyze file.bin # analyze data and recommend settings
+pltz -j 4 file.bin      # limit to 4 threads
+pltz -j 50% file.bin    # use 50% of available cores
+pltz -j unlimited file.bin # use all cores (default)
 cat data | pltz -c | pltz -dc   # pipe round-trip
 ```
 

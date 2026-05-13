@@ -341,3 +341,55 @@ compressed size. The current approach finds this sweet spot automatically.
 
 Alternative geometries remain on the roadmap as 'Future Investigation'
 but are deprioritized based on these results.
+
+## Session: 2026-05-12
+
+### Thread Pool Control
+
+Added `-j`/`--threads` CLI argument for controlling parallelism:
+- `0`, `unlimited`, `all` → use all available cores (rayon default)
+- Specific number (e.g., `4`) → limit to exactly N threads
+- Percentage (e.g., `50%`) → use that percentage of available cores, rounded down (min 1)
+
+Configures rayon's global thread pool at startup. All parallel work (geometry search,
+track analysis, chunk encoding, best-mode search) respects the setting.
+
+### Additional Parallelism
+
+- `encode_chunked()` now compresses all chunks in parallel via `par_iter`
+- `find_best_compression()` (`-b` mode) evaluates stride candidates and chunk sizes in parallel
+
+### Performance: Entropy Fast-Path
+
+Two optimizations that dramatically improve speed on high-entropy (random/compressed) data:
+
+**1. Analyzer fast-path** (`analyzer.rs`):
+When a track has >200 unique byte values, skip expensive detectors (FFT/periodic,
+polynomial fitting, diff_table, mod_arith, fibonacci, mirror, sparse, piecewise_linear,
+interleaved_linear, exponential, delta_rle, xor_mask). These can't find patterns in
+random data and were consuming most of the analysis time.
+
+**2. Raw compressor fast-path** (`codec.rs`):
+When a raw track has ≥150 unique byte values, skip zstd and brotli — just use deflate.
+zstd has significant per-call initialization overhead, and on high-entropy data it
+can't beat deflate anyway. This eliminated a 680ms → 25ms improvement on 4KB random data.
+
+**Results:**
+- Random 4KB: 680ms → 25ms (27× faster)
+- Mixed structured+random 4KB: 680ms → 29ms (23× faster)
+- Structured data: unchanged (19-25ms)
+- All 48 tests still pass — no compression ratio regression
+
+### Benchmark Results (post-optimization)
+
+| Data | PLTZ | gzip | zstd | PLTZ advantage |
+|------|------|------|------|----------------|
+| Linear ramp 4KB | **57B** | 342B | 280B | 6× better than gzip |
+| Linear ramps 16KB | **153B** | 436B | 280B | 2.8× better |
+| f64 epoch array 8KB | **350B** | 2664B | 2325B | 7.6× better |
+| u32 address table 4KB | **190B** | 1018B | 2223B | 5.4× better |
+| Firmware 4KB | **66B** | 254B | 286B | 3.8× better |
+| Mixed structured+random | **2115B** | 2404B | 2328B | 1.1× better |
+| Constant fill 64KB | 278B | 106B | **24B** | zstd wins |
+| Random data 4KB | 4134B | 4129B | **4110B** | ~1% overhead |
+| English text 4KB | 414B | 101B | **68B** | text not our domain |
