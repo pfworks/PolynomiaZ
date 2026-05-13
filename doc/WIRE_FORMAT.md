@@ -1,12 +1,12 @@
 # PLTZ Wire Format Specification
 
 Version: 2  
-Date: 2026-05-07  
+Date: 2026-05-12  
 Status: Stable (backward-compatible additions only)
 
 ## Overview
 
-PLTZ uses four magic signatures for different container formats:
+PLTZ uses six magic signatures for different container formats:
 
 | Magic | Format | Description |
 |-------|--------|-------------|
@@ -14,6 +14,8 @@ PLTZ uses four magic signatures for different container formats:
 | `PLTC` | Columnar | Columnar-transformed wrapper around PLTZ |
 | `PLTS` | Streaming | Chunked/streaming with per-chunk geometry |
 | `PLTI` | Image | Lossy/lossless image codec |
+| `PLTV` | Video | Lossy color video (YCbCr 4:2:0, motion compensation) |
+| `PLTA` | Audio | PCM audio codec (lossless + lossy) |
 
 All multi-byte integers are **little-endian** unless noted otherwise.
 
@@ -217,6 +219,72 @@ Given pattern tag and payload, reconstruct `sectors` bytes:
 - **DELTA_WIDE:** Read start as u32, then accumulate deltas (i8 if dw=1, i16 if dw=2). Pack each value as u32 LE (or u16 if width=2).
 - **RAW:** Copy bytes directly.
 - **RAW_COMPRESSED:** Decompress with indicated method, then copy.
+
+---
+
+## PLTV Format (Video)
+
+```
+Offset  Size  Field
+------  ----  -----
+0       4     Magic: "PLTV" (0x50 0x4C 0x54 0x56)
+4       2     Width in pixels (uint16 LE)
+6       2     Height in pixels (uint16 LE)
+8       1     FPS (uint8)
+9       1     Quality (1-255, max per-pixel error)
+10      2     Number of frames (uint16 LE)
+
+Per frame:
+  0     1     Frame type (0=I-frame, 1=P-frame, 2=B-frame)
+  1     4     Frame data length (uint32 LE)
+  5     var   Compressed frame data
+```
+
+### I-frame
+
+Three independently PLTI-compressed planes (Y, Cb, Cr). Cb and Cr are half-resolution (4:2:0 subsampling).
+
+### P-frame
+
+Motion-compensated prediction from previous reference frame:
+- Motion vectors: `num_blocks(u16) + [(dx i8, dy i8)] × N` (16×16 blocks, ±16 pixel search)
+- Residual planes: PLTI-compressed difference (current - predicted + 128)
+
+### B-frame
+
+Bidirectional prediction (picks better reference from past or future):
+- `ref_direction(u8)` — 0=past reference, 1=future reference
+- Followed by P-frame-style motion vectors and residuals
+
+GOP structure: `I B P B P B P ...` — B-frames do not update the reference.
+
+---
+
+## PLTA Format (Audio)
+
+```
+Offset  Size  Field
+------  ----  -----
+0       4     Magic: "PLTA" (0x50 0x4C 0x54 0x41)
+4       2     Sample rate / 100 (uint16 LE, e.g., 441 = 44100 Hz)
+6       1     Bits per sample (8 or 16)
+7       1     Channels (1=mono, 2=stereo)
+8       1     Quality (0=lossless, 1-255=max per-sample error)
+9       1     Frame size / 16 (uint8, e.g., 16 = 256 samples)
+10      2     Number of frames (uint16 LE)
+
+Per frame:
+  0     2     Compressed frame length (uint16 LE)
+  2     var   Compressed frame data
+```
+
+### Lossless mode (quality=0)
+
+Each frame is independently PLTZ-compressed (raw PCM bytes → pattern detection).
+
+### Lossy mode (quality>0)
+
+Each frame is treated as a 1-row PLTI image and compressed with the given quality threshold. For 16-bit audio, uses 16-bit image depth.
 
 ---
 

@@ -120,11 +120,11 @@ pub fn decode_chunked(compressed: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// Encode (compress) data into PLTZ binary format.
-/// Automatically uses chunked mode for data > 4GB.
+/// Automatically uses chunked mode for large data (>1MB for performance, >4GB for format limit).
 pub fn encode(data: &[u8], raw_compressor: RawCompressor) -> Vec<u8> {
-    // Auto-chunk if data exceeds uint32 max
-    if data.len() > u32::MAX as usize {
-        let chunk_size = 64 * 1024 * 1024; // 64MB chunks for large files
+    // Auto-chunk large files for performance
+    if data.len() > 1024 * 1024 {
+        let chunk_size = 64 * 1024; // 64KB chunks
         return encode_chunked(data, raw_compressor, chunk_size);
     }
 

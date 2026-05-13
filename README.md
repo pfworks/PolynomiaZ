@@ -137,12 +137,26 @@ rust/src/
 ├── lib.rs           — Module declarations
 ├── main.rs          — CLI binary (bzip2-style interface)
 ├── platter.rs       — Disk geometry, data layout
-├── analyzer.rs      — Pattern detection (18 types, rustfft for periodic)
+├── analyzer.rs      — Pattern detection (23 types, rustfft for periodic)
 ├── codec.rs         — Binary encode/decode, adaptive geometry, multi-platter
 ├── columnar.rs      — Columnar pre-processing transform
 ├── cross_track.rs   — Cross-track meta-descriptor optimization
 ├── encrypt.rs       — Structured encryption (⚠️ demo)
-└── image.rs         — Image codec (lossless + lossy, 8/16-bit)
+├── image.rs         — Image codec (lossless + lossy, 8/16-bit)
+├── video.rs         — Video codec (PLTV — YCbCr 4:2:0, motion compensation, B-frames)
+├── audio.rs         — Audio codec (PLTA — PCM frame-based, lossless + lossy)
+├── visualize.rs     — SVG platter diagram generation (--visualize)
+└── ffi.rs           — C FFI bindings (libpltz.so / libpltz.dylib)
+
+clib/
+├── pltz.h           — C header for FFI bindings
+├── test_pltz.c      — C integration test
+└── README.md        — C library usage guide
+
+pltzfs/
+├── src/             — Compressed filesystem prototype (multi-platter storage)
+├── Cargo.toml       — Rust crate config
+└── README.md        — Filesystem usage guide
 
 tests/
 ├── test_codec.py    — Python round-trip tests
@@ -201,6 +215,9 @@ Per platter:
 - [x] Auto-optimization (`pltz -b`, `pltz --analyze`)
 - [x] Visualization (`pltz --visualize` → SVG platter diagram)
 - [x] Video codec (PLTV — YCbCr 4:2:0, motion compensation, B-frames)
+- [x] Audio codec (PLTA — PCM frame-based, lossless + lossy)
+- [x] C FFI bindings (`clib/` — libpltz.so / libpltz.dylib)
+- [x] Compressed filesystem prototype (`pltzfs/` — multi-platter storage)
 
 ### Future Investigation: Alternative Geometries
 
@@ -301,3 +318,12 @@ Color lossy video with YCbCr 4:2:0, motion compensation (16×16 block matching),
 | Clean synthetic | 78:1 | **1874:1** | 95:1 |
 
 PLTV wins on real-world noisy surveillance (where sensor noise defeats H.264's motion estimation). H.264 wins on clean synthetic content.
+
+### Audio Codec (PLTA)
+
+PCM audio compression using PLTZ pattern detection per frame. Each audio frame (e.g., 256 samples) is treated as one track on the platter.
+
+- **Lossless** (quality=0): exact pattern detection (CONST for silence, LINEAR for ramps, PERIODIC for tones)
+- **Lossy** (quality=1-255): per-sample error threshold, uses PLTI image codec on each frame
+
+**Best for:** Synthesized tones, calibration signals, telemetry audio, silence detection, simple waveforms. Not intended for music or speech (use Opus/AAC).

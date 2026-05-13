@@ -501,6 +501,19 @@ Clean synthetic & 78:1 & \textbf{1874:1} & 95:1 \\
 
 PLTV wins on real-world noisy surveillance because sensor noise defeats H.264's motion estimation (it encodes noise as ``motion''). PLTV's quality threshold absorbs the noise, collapsing static regions to CONST regardless of noise level. H.264 wins on clean synthetic content where its block matching and DCT are ideal.
 
+\subsection{Audio Codec (PLTA)}
+
+The platter model also applies to PCM audio: each audio frame (e.g., 256 samples) is treated as one track. The PLTA codec supports both lossless and lossy modes:
+
+\begin{description}
+\item[Lossless (quality=0):] Each frame is independently PLTZ-compressed. Silence becomes CONST, linear ramps become LINEAR, pure tones become PERIODIC.
+\item[Lossy (quality=1--255):] Each frame is treated as a 1-row PLTI image with the given per-sample error threshold. Supports 8-bit and 16-bit PCM.
+\end{description}
+
+\textbf{Target applications:} Synthesized tones, calibration signals, telemetry audio, silence detection, simple waveforms. Not intended for music or speech (use Opus/AAC for those).
+
+\textbf{Format:} Uses magic \texttt{PLTA} with a 12-byte header (sample rate, bit depth, channels, quality, frame size, frame count), followed by independently-compressed frames.
+
 \section{Limitations and Future Work}
 
 \textbf{Current limitations:}
@@ -518,6 +531,9 @@ PLTV wins on real-world noisy surveillance because sensor noise defeats H.264's 
 \item File format versioning: PLTS v2 header with version byte; decoder rejects unknown future versions
 \item Human-readable size arguments: \texttt{64k}, \texttt{1M}, \texttt{auto}
 \item Auto-optimization: \texttt{pltz -b} tries multiple configurations and picks the smallest output; \texttt{pltz --analyze} reports recommendations without compressing
+\item Audio codec (PLTA): PCM frame-based compression for calibration signals and telemetry audio
+\item C FFI bindings (\texttt{clib/}): \texttt{libpltz.so}/\texttt{libpltz.dylib} with compress/decompress/size API
+\item Compressed filesystem prototype (\texttt{pltzfs/}): multi-platter storage with per-type platters
 \end{itemize}
 
 \textbf{Future work:}
@@ -647,7 +663,7 @@ The \texttt{pltz --visualize} command generates SVG diagrams showing the disk pl
 
 \section{Conclusion}
 
-PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, compressing parameter metadata across tracks, and optionally encrypting only the minimal parameter bytes, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The columnar pre-processing transform extends this advantage to record-oriented data, the structured encryption scheme demonstrates that compression and encryption need not be mutually exclusive, and the PLTI image codec achieves 17--113$\times$ compression on space-relevant imagery by exploiting the mathematical structure inherent in calibration frames, star fields, and illumination gradients.
+PolynomiaZ demonstrates that domain-specific compression based on mathematical function fitting can dramatically outperform general-purpose algorithms on structured numerical data. By modeling data as points on a virtual disk platter, fitting functions per track, compressing parameter metadata across tracks, and optionally encrypting only the minimal parameter bytes, PLTZ achieves 5--12$\times$ better compression than zlib on linear sequences, address tables, and epoch arrays---exactly the data structures found in firmware, telemetry, and scientific computing. The columnar pre-processing transform extends this advantage to record-oriented data, the structured encryption scheme demonstrates that compression and encryption need not be mutually exclusive, the PLTI image codec achieves 17--113$\times$ compression on space-relevant imagery, the PLTV video codec beats H.264 by 2$\times$ on noisy surveillance footage, and the PLTA audio codec provides efficient compression for calibration signals and telemetry audio. C FFI bindings and a compressed filesystem prototype demonstrate the codec's applicability as a building block for larger systems.
 
 \appendix
 
@@ -669,6 +685,8 @@ All multi-byte integers are little-endian unless noted otherwise.
 \texttt{PLTC} & Columnar & Columnar-transformed wrapper \\
 \texttt{PLTS} & Streaming & Chunked with per-chunk geometry \\
 \texttt{PLTI} & Image & Lossy/lossless image codec \\
+\texttt{PLTV} & Video & Lossy color video (YCbCr 4:2:0, motion compensation) \\
+\texttt{PLTA} & Audio & PCM audio codec (lossless + lossy) \\
 \bottomrule
 \end{tabular}
 \end{table}
