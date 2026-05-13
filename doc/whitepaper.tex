@@ -329,7 +329,7 @@ LZMA & Large dictionary + range coding & General purpose \\
 \caption{Algorithmic comparison.}
 \end{table}
 
-PLTZ occupies a unique niche: it recognizes \emph{semantic} structure (``this is a linear function'') rather than \emph{syntactic} structure (``these bytes appeared before''). The two approaches are complementary---PLTZ with a deflate fallback combines the strengths of both.
+PLTZ occupies a unique niche: it recognizes \emph{semantic} structure (``this is a linear function'') rather than \emph{syntactic} structure (``these bytes appeared before''). The two approaches are complementary---PLTZ with a configurable raw fallback (deflate, zstd, or brotli) combines the strengths of both.
 
 \section{Columnar Pre-Processing}
 
