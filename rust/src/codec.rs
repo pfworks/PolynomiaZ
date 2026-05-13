@@ -955,7 +955,23 @@ fn compress_raw_best(data: &[u8], mode: RawCompressor) -> Option<(u8, Vec<u8>)> 
         RawCompressor::Zstd => zstd_compress(data).map(|c| (2u8, c)),
         RawCompressor::Brotli => brotli_compress(data).map(|c| (3u8, c)),
         RawCompressor::Best => {
-            // Try all three, pick smallest
+            // For high-entropy data, skip expensive compressors — they won't help
+            // and have significant per-call overhead (especially zstd init)
+            let high_entropy = {
+                let mut seen = [false; 256];
+                let mut unique = 0u16;
+                for &b in data.iter() {
+                    if !seen[b as usize] { seen[b as usize] = true; unique += 1; }
+                    if unique >= 150 { break; }
+                }
+                unique >= 150
+            };
+
+            if high_entropy {
+                // Just use deflate — zstd/brotli won't meaningfully beat it
+                return deflate_compress(data).map(|c| (1u8, c));
+            }
+
             let mut best: Option<(u8, Vec<u8>)> = None;
             if let Some(c) = deflate_compress(data) {
                 best = Some((1, c));

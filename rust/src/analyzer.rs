@@ -1017,41 +1017,56 @@ pub fn analyze_track(track: &[u8], track_idx: u16) -> TrackEncoding {
     if let Some(params) = detect_delta(track) {
         return TrackEncoding { pattern: PatternType::Delta, params, track_idx };
     }
-    if let Some(params) = detect_periodic(track) {
-        return TrackEncoding { pattern: PatternType::Periodic, params, track_idx };
-    }
-    if let Some(params) = detect_poly(track) {
-        return TrackEncoding { pattern: PatternType::Poly, params, track_idx };
-    }
-    if let Some(params) = detect_diff_table(track) {
-        return TrackEncoding { pattern: PatternType::DiffTable, params, track_idx };
-    }
-    if let Some(params) = detect_mod_arith(track) {
-        return TrackEncoding { pattern: PatternType::ModArith, params, track_idx };
-    }
-    if let Some(params) = detect_fibonacci(track) {
-        return TrackEncoding { pattern: PatternType::Fibonacci, params, track_idx };
-    }
-    if let Some(params) = detect_mirror(track) {
-        return TrackEncoding { pattern: PatternType::Mirror, params, track_idx };
-    }
-    if let Some(params) = detect_sparse(track) {
-        return TrackEncoding { pattern: PatternType::Sparse, params, track_idx };
-    }
-    if let Some(params) = detect_piecewise_linear(track) {
-        return TrackEncoding { pattern: PatternType::PiecewiseLinear, params, track_idx };
-    }
-    if let Some(params) = detect_interleaved_linear(track) {
-        return TrackEncoding { pattern: PatternType::InterleavedLinear, params, track_idx };
-    }
-    if let Some(params) = detect_exponential(track) {
-        return TrackEncoding { pattern: PatternType::Exponential, params, track_idx };
-    }
-    if let Some(params) = detect_delta_rle(track) {
-        return TrackEncoding { pattern: PatternType::DeltaRle, params, track_idx };
-    }
-    if let Some(params) = detect_xor_mask(track) {
-        return TrackEncoding { pattern: PatternType::XorMask, params, track_idx };
+
+    // High-entropy fast path: if >200 unique bytes in track, skip expensive detectors
+    // (periodic/FFT, poly fitting, etc.) — they won't find patterns in random data
+    let high_entropy = {
+        let mut seen = [false; 256];
+        let mut unique = 0u16;
+        for &b in track.iter() {
+            if !seen[b as usize] { seen[b as usize] = true; unique += 1; }
+            if unique > 200 { break; }
+        }
+        unique > 200
+    };
+
+    if !high_entropy {
+        if let Some(params) = detect_periodic(track) {
+            return TrackEncoding { pattern: PatternType::Periodic, params, track_idx };
+        }
+        if let Some(params) = detect_poly(track) {
+            return TrackEncoding { pattern: PatternType::Poly, params, track_idx };
+        }
+        if let Some(params) = detect_diff_table(track) {
+            return TrackEncoding { pattern: PatternType::DiffTable, params, track_idx };
+        }
+        if let Some(params) = detect_mod_arith(track) {
+            return TrackEncoding { pattern: PatternType::ModArith, params, track_idx };
+        }
+        if let Some(params) = detect_fibonacci(track) {
+            return TrackEncoding { pattern: PatternType::Fibonacci, params, track_idx };
+        }
+        if let Some(params) = detect_mirror(track) {
+            return TrackEncoding { pattern: PatternType::Mirror, params, track_idx };
+        }
+        if let Some(params) = detect_sparse(track) {
+            return TrackEncoding { pattern: PatternType::Sparse, params, track_idx };
+        }
+        if let Some(params) = detect_piecewise_linear(track) {
+            return TrackEncoding { pattern: PatternType::PiecewiseLinear, params, track_idx };
+        }
+        if let Some(params) = detect_interleaved_linear(track) {
+            return TrackEncoding { pattern: PatternType::InterleavedLinear, params, track_idx };
+        }
+        if let Some(params) = detect_exponential(track) {
+            return TrackEncoding { pattern: PatternType::Exponential, params, track_idx };
+        }
+        if let Some(params) = detect_delta_rle(track) {
+            return TrackEncoding { pattern: PatternType::DeltaRle, params, track_idx };
+        }
+        if let Some(params) = detect_xor_mask(track) {
+            return TrackEncoding { pattern: PatternType::XorMask, params, track_idx };
+        }
     }
 
     TrackEncoding {
