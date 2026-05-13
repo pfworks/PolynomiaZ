@@ -396,12 +396,12 @@ PLTZ offers a third approach: compress first via pattern detection, then encrypt
 \midrule
 Encrypt-then-compress & 4,096 B & IND-CPA (full) \\
 Compress-then-encrypt & $\sim$315 B & Leaks compressed size \\
-\textbf{PLTZ structured (PLTE)} & \textbf{168 B} & Leaks pattern types \\
-\textbf{PLTZ full (PLTF)} & \textbf{172 B} & \textbf{No leakage} \\
-\textbf{PLTZ dual-key (PLTD)} & \textbf{172 B} & Tiered (outer: structure; both: full) \\
+\textbf{PLTZ structured (PLTE)} & \textbf{168 B} & Leaks pattern types + compressed size \\
+\textbf{PLTZ full (PLTF)} & \textbf{172 B} & Leaks compressed size only \\
+\textbf{PLTZ dual-key (PLTD)} & \textbf{172 B} & Leaks compressed size; outer key reveals structure \\
 \bottomrule
 \end{tabular}
-\caption{Comparison of encryption+compression approaches. PLTZ modes achieve 24:1 compression while encrypted.}
+\caption{Comparison of encryption+compression approaches. PLTZ modes achieve 24:1 compression while encrypted. All compress-then-encrypt schemes leak compressed size; only encrypt-then-compress avoids this.}
 \end{table}
 
 \subsection{How It Works}
