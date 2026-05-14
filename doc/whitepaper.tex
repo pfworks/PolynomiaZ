@@ -369,7 +369,7 @@ Standard encryption and compression are fundamentally at odds:
 \item \textbf{Compress-then-encrypt}: Achieves both, but compressed size leaks information about plaintext entropy (CRIME/BREACH attacks).
 \end{itemize}
 
-PLTZ offers a third approach: compress first via pattern detection, then encrypt the compressed representation. Because the compressed form consists of (a) structural metadata (pattern types, track layout) and (b) parameter values, these can be encrypted independently, enabling multiple security/efficiency tradeoffs.
+PLTZ's structured encryption is a refinement of compress-then-encrypt. Like all compress-then-encrypt schemes, it leaks compressed size. Its advantage is not in eliminating this leakage, but in enabling granular encryption of the compressed representation: because the compressed form consists of (a) structural metadata (pattern types, track layout) and (b) parameter values, these can be encrypted independently, supporting tiered access control without sacrificing compression ratio.
 
 \subsection{Three Encryption Modes}
 
