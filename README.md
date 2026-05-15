@@ -102,6 +102,7 @@ pltz --analyze file.bin # analyze data and recommend settings
 pltz -j 4 file.bin      # limit to 4 threads
 pltz -j 50% file.bin    # use 50% of available cores
 pltz -j unlimited file.bin # use all cores (default)
+pltz --visualize file.bin.pltz  # generate SVG platter diagram
 cat data | pltz -c | pltz -dc   # pipe round-trip
 ```
 
@@ -221,6 +222,10 @@ Per platter:
 - [x] Audio codec (PLTA — PCM frame-based, lossless + lossy)
 - [x] C FFI bindings (`clib/` — libpltz.so / libpltz.dylib)
 - [x] Compressed filesystem prototype (`pltzfs/` — multi-platter storage)
+- [x] Entropy fast-path (27× faster on random/high-entropy data)
+- [x] Auto-chunking for files >4GB (transparent PLTS chunked mode)
+- [x] Parallel chunk encoding and best-mode search
+- [x] Configurable thread pool (`-j N`, `-j 50%`, `-j unlimited`)
 
 ### Future Investigation: Alternative Geometries
 
@@ -255,16 +260,17 @@ When using `pltz -b`, the stride is auto-detected via byte-equality autocorrelat
 
 > **WARNING:** The encryption implementation uses a simplified stream cipher for demonstration purposes only. It is NOT cryptographically secure. Do not use for real data protection without replacing the cipher with a proper AEAD (ChaCha20-Poly1305 or AES-256-GCM).
 
-PLTZ Structured Encryption (PSE) encrypts pattern *parameters* while preserving the compressed structure:
+PLTZ's structured encryption is a refinement of compress-then-encrypt. Like all compress-then-encrypt schemes, it leaks compressed size. Its advantage is enabling granular encryption of the compressed representation: metadata and parameters can be encrypted independently, supporting tiered access control without sacrificing compression ratio.
 
 | Approach | 4KB linear ramp | Security |
 |----------|----------------|----------|
 | Encrypt-then-compress | 4,096B | IND-CPA (full) |
 | Compress-then-encrypt | ~315B | Leaks compressed size |
-| **PLTZ structured encrypt** | **168B** | Leaks pattern types |
-| **PLTZ full encrypt** | **172B** | **No leakage** |
+| **PLTZ structured (PLTE)** | **168B** | Leaks pattern types + compressed size |
+| **PLTZ full (PLTF)** | **172B** | Leaks compressed size only |
+| **PLTZ dual-key (PLTD)** | **172B** | Leaks compressed size; outer key reveals structure |
 
-**Two modes:**
+**Three modes:**
 
 - **Structured (PLTE):** Encrypts parameters only. Pattern types visible. Smallest output.
 - **Full (PLTF):** Encrypts both metadata AND parameters in separate streams. No information leakage except total compressed size. Only 4 bytes larger than structured.
